@@ -22,6 +22,8 @@ type DemoState = "idle" | "opening" | "streaming" | "closing" | "closed";
 
 interface CloseSummary {
   settled: string;
+  deposit: string;
+  refund: string;
   settleTxns: string[];
   closeTx: string | null;
   vouchersReceived: number;
@@ -170,7 +172,7 @@ export function StreamingDemo() {
         while (!controller.signal.aborted) {
           const delta = ppt * BigInt(TOKENS_PER_VOUCHER);
           if (cumulativeRef.current + delta > depositRef.current) {
-            setText((prev) => prev + "\n\n[deposit exhausted]");
+            setText((prev) => prev + "\n\n[deposit fully used]");
             break;
           }
           cumulativeRef.current += delta;
@@ -264,6 +266,8 @@ export function StreamingDemo() {
 
       setCloseSummary({
         settled: body.settled ?? "0",
+        deposit: body.deposit ?? "0",
+        refund: body.refund ?? "0",
         settleTxns: body.settle_txns ?? [],
         closeTx: body.close_tx ?? null,
         vouchersReceived: body.vouchers_received ?? 0,
@@ -300,7 +304,7 @@ export function StreamingDemo() {
     <>
       <header>
         <h1>
-          <span>Tempo</span> Stream Demo
+          <span>Tempo</span> Stream <span>Movement</span> Demo
         </h1>
         {connected && account ? (
           <div
@@ -420,6 +424,11 @@ export function StreamingDemo() {
 
           {closeSummary && (
             <div className="txn-list">
+              {BigInt(closeSummary.refund) > 0n && (
+                <p className="refund-info">
+                  Refunded: {formatAmount(BigInt(closeSummary.refund))} {TOKEN_SYMBOL} (unused deposit returned to your wallet)
+                </p>
+              )}
               <h3>
                 On-chain transactions ({closeSummary.settleTxns.length} settles
                 {closeSummary.closeTx ? " + 1 close" : ""})

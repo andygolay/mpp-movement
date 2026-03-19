@@ -47,9 +47,6 @@ header {
 header h1 {
   font-size: 1.25rem;
   font-weight: 600;
-}
-
-header h1 span {
   color: var(--green);
 }
 
@@ -118,7 +115,7 @@ button.danger {
   border-radius: 8px;
   padding: 1.25rem;
   min-height: 200px;
-  max-height: 400px;
+  max-height: 600px;
   overflow-y: auto;
   font-family: var(--font-mono);
   font-size: 0.875rem;
@@ -183,6 +180,13 @@ button.danger {
   margin-top: 1rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border);
+}
+
+.refund-info {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--green);
+  margin-bottom: 0.75rem;
 }
 
 .txn-list h3 {

@@ -136,6 +136,31 @@ SUGGESTED_DEPOSIT=10000
 
 The frontend defaults to USDCx already. To switch to MOVE, set `VITE_TOKEN_METADATA_ADDR=0xa`, `VITE_TOKEN_SYMBOL=MOVE`, and `VITE_TOKEN_DECIMALS=8` in `examples/movement-demo/.env`.
 
+#### USDC.e on Movement testnet
+
+To use USDC.e (6 decimals), copy the ready-made env files:
+
+```bash
+cp examples/movement/.env.usdc-e examples/movement/.env
+cp examples/movement-demo/.env.usdc-e examples/movement-demo/.env
+```
+
+Or set manually — server `examples/movement/.env`:
+
+```
+TOKEN_METADATA=0xc6f5b46ab5307dfe3e565668edcc1461b31cac5a6c2739fba17d9fdde16813a2
+PRICE_PER_TOKEN=10
+SUGGESTED_DEPOSIT=10000
+```
+
+Frontend `examples/movement-demo/.env`:
+
+```
+VITE_TOKEN_METADATA_ADDR=0xc6f5b46ab5307dfe3e565668edcc1461b31cac5a6c2739fba17d9fdde16813a2
+VITE_TOKEN_SYMBOL=USDC.e
+VITE_TOKEN_DECIMALS=6
+```
+
 ## On-Chain Contract
 
 The Movement payment method settles on the [TempoStreamChannel Move contract](https://github.com/andygolay/tempo-move) deployed on Movement testnet:

@@ -27,6 +27,7 @@ use mpp::protocol::methods::movement::{self, voucher};
 use mpp::format_www_authenticate;
 use sha3::{Digest, Sha3_256};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio_stream::StreamExt;
 
@@ -370,17 +371,35 @@ async fn chat(
         });
     }
 
-    // Stream tokens as SSE.
+    // Stream tokens as SSE, tracking actual delivery.
     let tokens = generate_tokens(&prompt, token_offset, tokens_bought as usize);
+    let actual_count = Arc::new(AtomicUsize::new(0));
+    let actual_count_stream = actual_count.clone();
+    let actual_count_done = actual_count.clone();
+    let state_done = state.clone();
+    let channel_id_done = channel_id.clone();
 
     let event_stream = async_stream::stream! {
         let mut stream = std::pin::pin!(tokens);
         let mut count = 0u64;
         while let Some(token) = StreamExt::next(&mut stream).await {
             count += 1;
+            actual_count_stream.store(count as usize, Ordering::Relaxed);
             yield Ok::<_, std::convert::Infallible>(
                 format!("data: {}\n\n", serde_json::json!({"token": token, "index": count}))
             );
+        }
+        // Correct tokens_delivered to reflect actual count.
+        let actually_streamed = count as usize;
+        actual_count_done.store(actually_streamed, Ordering::Relaxed);
+        {
+            let mut channels = state_done.channels.lock().unwrap();
+            if let Some(session) = channels.get_mut(&channel_id_done) {
+                let overshoot = tokens_bought as usize - actually_streamed;
+                if overshoot > 0 {
+                    session.tokens_delivered = session.tokens_delivered.saturating_sub(overshoot);
+                }
+            }
         }
         yield Ok(format!(
             "event: receipt\ndata: {}\n\n",
@@ -427,26 +446,37 @@ async fn close_channel(
         query.channel_id.strip_prefix("0x").unwrap_or(&query.channel_id),
     ).unwrap_or_default();
 
-    println!("  [close] channel {}... cumulative={}", &query.channel_id[..16], session.highest_cumulative);
+    // Settle only for tokens actually delivered, not the full voucher amount.
+    let fair_amount = (session.tokens_delivered as u64) * state.price_per_token;
+    let settle_amount = fair_amount.min(session.highest_cumulative);
+
+    println!(
+        "  [close] channel {}... tokens_delivered={}, fair_amount={}, voucher_cumulative={}",
+        &query.channel_id[..16], session.tokens_delivered, fair_amount, session.highest_cumulative
+    );
 
     let payload = EntryFunctionPayload::new(
         &format!("{}::channel::close", MODULE_ADDRESS),
         vec![
             serde_json::json!(MODULE_ADDRESS),
             serde_json::json!(format!("0x{}", hex::encode(&channel_id_bytes))),
-            serde_json::json!(session.highest_cumulative.to_string()),
+            serde_json::json!(settle_amount.to_string()),
             serde_json::json!(format!("0x{}", hex::encode(&session.highest_signature))),
             serde_json::json!(format!("0x{}", hex::encode(&session.authorized_pubkey))),
         ],
     );
 
+    let deposit = session.highest_cumulative;
     match state.rest_client.build_sign_submit(&state.server_key, &state.server_address, payload).await {
         Ok(tx) => {
             println!("  [close] tx: {tx}");
             Json(serde_json::json!({
                 "status": "closed",
                 "close_tx": tx,
-                "settled": session.highest_cumulative.to_string(),
+                "settled": settle_amount.to_string(),
+                "deposit": deposit.to_string(),
+                "tokens_delivered": session.tokens_delivered,
+                "refund": (deposit - settle_amount).to_string(),
                 "settle_txns": session.settle_tx_hashes,
                 "vouchers_received": session.voucher_count,
             }))
@@ -477,6 +507,19 @@ fn generate_tokens(
         " Then,".into(), " evaluate".into(), " the".into(), " available".into(),
         " evidence.".into(),
         "\n\n".into(),
+        "Second,".into(), " think".into(), " about".into(), " the".into(),
+        " broader".into(), " implications.".into(),
+        " Every".into(), " decision".into(), " has".into(), " ripple".into(),
+        " effects".into(), " that".into(), " extend".into(), " far".into(),
+        " beyond".into(), " the".into(), " immediate".into(), " situation.".into(),
+        "\n\n".into(),
+        "Third,".into(), " examine".into(), " the".into(), " problem".into(),
+        " from".into(), " multiple".into(), " angles.".into(),
+        " What".into(), " looks".into(), " like".into(), " a".into(),
+        " dead".into(), " end".into(), " from".into(), " one".into(),
+        " perspective".into(), " might".into(), " be".into(), " an".into(),
+        " opportunity".into(), " from".into(), " another.".into(),
+        "\n\n".into(),
         "Finally,".into(), " draw".into(), " your".into(), " own".into(),
         " conclusions".into(), " based".into(), " on".into(), " what".into(),
         " you".into(), " find.".into(),
@@ -484,12 +527,22 @@ fn generate_tokens(
         "The".into(), " key".into(), " insight".into(), " is".into(), " that".into(),
         " every".into(), " question".into(), " contains".into(), " the".into(),
         " seed".into(), " of".into(), " its".into(), " own".into(), " answer.".into(),
+        " The".into(), " act".into(), " of".into(), " asking".into(),
+        " is".into(), " itself".into(), " a".into(), " step".into(),
+        " toward".into(), " understanding.".into(),
         "\n\n".into(),
         "In".into(), " summary:".into(), " stay".into(), " curious,".into(),
         " keep".into(), " exploring,".into(), " and".into(), " never".into(),
         " stop".into(), " learning.".into(),
         " The".into(), " universe".into(), " rewards".into(), " those".into(),
         " who".into(), " ask".into(), " good".into(), " questions.".into(),
+        "\n\n".into(),
+        "Remember".into(), " that".into(), " knowledge".into(), " builds".into(),
+        " on".into(), " itself.".into(),
+        " Each".into(), " thing".into(), " you".into(), " learn".into(),
+        " opens".into(), " doors".into(), " to".into(), " new".into(),
+        " possibilities".into(), " you".into(), " never".into(),
+        " knew".into(), " existed.".into(),
         "\n\n".into(),
         "Hope".into(), " that".into(), " helps!".into(),
         " Feel".into(), " free".into(), " to".into(), " ask".into(),

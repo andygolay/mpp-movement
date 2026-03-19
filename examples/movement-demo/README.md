@@ -1,6 +1,6 @@
 # Movement Stream Demo
 
-React frontend for the [MPP pay-per-token SSE server](../movement/src/sse_server.rs). Connect a wallet, open a payment channel, and stream AI text paid with USDCx (or MOVE) vouchers on Movement testnet.
+React frontend for the [MPP pay-per-token SSE server](../movement/src/sse_server.rs). Connect a wallet, open a payment channel, and stream AI text paid with USDCx, USDC.e, or MOVE vouchers on Movement testnet.
 
 ## How it works
 
@@ -46,6 +46,16 @@ SUGGESTED_DEPOSIT=10000
 
 This gives 0.0001 USDCx per voucher (10 tokens × 10 base units each), with a 0.01 USDCx deposit.
 
+### USDC.e config (6 decimals)
+
+```
+TOKEN_METADATA=0xc6f5b46ab5307dfe3e565668edcc1461b31cac5a6c2739fba17d9fdde16813a2
+PRICE_PER_TOKEN=10
+SUGGESTED_DEPOSIT=10000
+```
+
+Same pricing as USDCx. Ready-made env files: `cp ../.env.usdc-e ../movement/.env && cp .env.usdc-e .env`
+
 ## Frontend environment variables
 
 Copy `.env.example` to `.env` and adjust as needed. The frontend defaults to USDCx.
@@ -78,5 +88,5 @@ SUGGESTED_DEPOSIT=100000
 ## Notes
 
 - The server generates its own ephemeral wallet and funds it from the testnet faucet (for gas to settle/close)
-- Your wallet needs USDCx (or MOVE) on Movement testnet to open a channel
-- Server and frontend token configs must match — if one uses USDCx, the other must too
+- Your wallet needs USDCx, USDC.e, or MOVE on Movement testnet to open a channel
+- Server and frontend token configs must match — both must use the same token
