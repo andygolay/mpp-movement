@@ -15,11 +15,12 @@
 use axum::{
     body::Body,
     extract::{Query, State},
-    http::{header, StatusCode},
+    http::{header, Method, StatusCode},
     response::IntoResponse,
     routing::get,
     Json, Router,
 };
+use tower_http::cors::{Any, CorsLayer};
 use ed25519_dalek::SigningKey;
 use mpp::protocol::methods::movement::rest_client::{EntryFunctionPayload, MovementRestClient};
 use mpp::protocol::methods::movement::{self, voucher};
@@ -34,11 +35,10 @@ const FAUCET_URL: &str = "https://faucet.testnet.movementnetwork.xyz";
 const MODULE_ADDRESS: &str =
     "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58";
 
-/// Price per token in MOVE base units (8 decimals).
-const PRICE_PER_TOKEN: u64 = 1_000;
-
-/// Suggested deposit for a session.
-const SUGGESTED_DEPOSIT: u64 = 100_000;
+/// Defaults for MOVE (8 decimals). Override with env vars for other tokens.
+const DEFAULT_PRICE_PER_TOKEN: u64 = 1_000;
+const DEFAULT_SUGGESTED_DEPOSIT: u64 = 100_000;
+const DEFAULT_TOKEN_METADATA: &str = "0xa";
 
 /// Settle on-chain every N vouchers.
 const SETTLE_EVERY: u32 = 5;
@@ -48,6 +48,12 @@ struct AppState {
     realm: String,
     /// Server's (payee) address.
     server_address: String,
+    /// Token FA metadata address.
+    token_metadata: String,
+    /// Price per token in base units.
+    price_per_token: u64,
+    /// Suggested deposit for a session.
+    suggested_deposit: u64,
     /// Server's signing key for on-chain settlement.
     server_key: SigningKey,
     rest_client: MovementRestClient,
@@ -84,15 +90,32 @@ fn derive_address(pubkey: &[u8; 32]) -> String {
 
 #[tokio::main]
 async fn main() {
+    let _ = dotenvy::dotenv();
+
     // Generate a server wallet (the payee).
     let server_key = SigningKey::from_bytes(&rand::random());
     let server_pubkey = server_key.verifying_key().to_bytes();
     let server_address = derive_address(&server_pubkey);
     let rest_client = MovementRestClient::new(REST_URL);
 
+    // Token configuration via env vars (defaults to MOVE).
+    // For USDCx (6 decimals): TOKEN_METADATA=0x63f1...  PRICE_PER_TOKEN=10  SUGGESTED_DEPOSIT=10000
+    let token_metadata = std::env::var("TOKEN_METADATA")
+        .unwrap_or_else(|_| DEFAULT_TOKEN_METADATA.to_string());
+    let price_per_token: u64 = std::env::var("PRICE_PER_TOKEN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_PRICE_PER_TOKEN);
+    let suggested_deposit: u64 = std::env::var("SUGGESTED_DEPOSIT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_SUGGESTED_DEPOSIT);
+
     println!("Movement Pay-Per-Token LLM API");
     println!("  Server (payee): {server_address}");
-    println!("  Price per token: {} MOVE", PRICE_PER_TOKEN as f64 / 1e8);
+    println!("  Token metadata: {token_metadata}");
+    println!("  Price per token: {price_per_token} base units");
+    println!("  Suggested deposit: {suggested_deposit} base units");
     println!("  Settles every {SETTLE_EVERY} vouchers\n");
 
     // Fund server from faucet.
@@ -122,13 +145,23 @@ async fn main() {
         server_address,
         server_key,
         rest_client,
+        token_metadata,
+        price_per_token,
+        suggested_deposit,
         channels: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
+
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any)
+        .expose_headers([header::WWW_AUTHENTICATE]);
 
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/chat", get(chat))
         .route("/api/close", get(close_channel))
+        .layer(cors)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3001")
@@ -156,8 +189,8 @@ async fn chat(
             let challenge = movement::charge_challenge(
                 &state.secret_key,
                 &state.realm,
-                &SUGGESTED_DEPOSIT.to_string(),
-                movement::MOVE_TOKEN_METADATA,
+                &state.suggested_deposit.to_string(),
+                &state.token_metadata,
                 &state.server_address,
             )
             .expect("failed to create challenge");
@@ -168,8 +201,10 @@ async fn chat(
                 [(header::WWW_AUTHENTICATE, www_auth)],
                 Json(serde_json::json!({
                     "error": "Payment Required",
-                    "price_per_token": PRICE_PER_TOKEN.to_string(),
-                    "suggested_deposit": SUGGESTED_DEPOSIT.to_string(),
+                    "price_per_token": state.price_per_token.to_string(),
+                    "suggested_deposit": state.suggested_deposit.to_string(),
+                    "recipient": state.server_address,
+                    "token": state.token_metadata,
                 })),
             )
                 .into_response();
@@ -272,7 +307,7 @@ async fn chat(
 
     // Accept voucher.
     let delta = cumulative - session.highest_cumulative;
-    let tokens_bought = delta / PRICE_PER_TOKEN;
+    let tokens_bought = delta / state.price_per_token;
     session.highest_cumulative = cumulative;
     session.highest_signature = sig_bytes.to_vec();
     session.voucher_count += 1;
@@ -287,7 +322,7 @@ async fn chat(
     if tokens_bought == 0 {
         return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
             "error": "voucher delta too small",
-            "price_per_token": PRICE_PER_TOKEN.to_string(),
+            "price_per_token": state.price_per_token.to_string(),
         })))
             .into_response();
     }
