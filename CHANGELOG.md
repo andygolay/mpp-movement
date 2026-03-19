@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 (2026-03-19)
+
+### Patch Changes
+
+- Fixed core problem type base URI to use the canonical `https://paymentauth.org/problems` domain instead of the temporary GitHub Pages URL. (by @AndyGolay, [7ac9841](https://github.com/andygolay/mpp-movement/commit/7ac9841))
+
 ## `mpp@0.5.0`
 
 ### Minor Changes
