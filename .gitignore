@@ -20,3 +20,13 @@ Cargo.lock
 fuzz/target/
 fuzz/corpus/
 fuzz/artifacts/
+
+# Node / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+pnpm-lock.yaml
+
+# Environment
+.env
+.env.local

@@ -15,7 +15,7 @@ React frontend for the [MPP pay-per-token SSE server](../movement/src/sse_server
 
 ```bash
 # 1. Start the SSE server (from repo root)
-cargo run --bin movement-sse-server
+cargo run --manifest-path examples/movement/Cargo.toml --bin movement-sse-server
 
 # 2. In another terminal, start the frontend
 cd examples/movement-demo
@@ -25,19 +25,58 @@ pnpm dev
 
 Open http://localhost:5173 and connect your wallet.
 
-## Configuration
+## Server environment variables
 
-Copy `.env.example` to `.env` and adjust as needed. Defaults to USDCx on Movement testnet.
+Set these in `examples/movement/.env` (loaded automatically via dotenvy):
 
-To use native MOVE instead (works with the testnet faucet):
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TOKEN_METADATA` | `0xa` (MOVE) | FA metadata address for the payment token |
+| `PRICE_PER_TOKEN` | `1000` | Price per streamed token in base units |
+| `SUGGESTED_DEPOSIT` | `100000` | Deposit amount suggested to the client |
+| `MPP_SECRET_KEY` | `sse-example-secret` | HMAC secret for 402 challenge IDs |
+
+### USDCx config (6 decimals)
+
+```
+TOKEN_METADATA=0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6
+PRICE_PER_TOKEN=10
+SUGGESTED_DEPOSIT=10000
+```
+
+This gives 0.0001 USDCx per voucher (10 tokens × 10 base units each), with a 0.01 USDCx deposit.
+
+## Frontend environment variables
+
+Copy `.env.example` to `.env` and adjust as needed. The frontend defaults to USDCx.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_SERVER_URL` | `http://localhost:3001` | SSE server URL |
+| `VITE_MODULE_ADDRESS` | `0x3e9edf...` | TempoStreamChannel module address |
+| `VITE_REGISTRY_ADDR` | same as module | Channel registry address |
+| `VITE_TOKEN_METADATA_ADDR` | `0x63f169...` (USDCx) | FA metadata address |
+| `VITE_TOKEN_SYMBOL` | `USDCx` | Display symbol |
+| `VITE_TOKEN_DECIMALS` | `6` | Token decimal places |
+
+### To use native MOVE instead
+
 ```
 VITE_TOKEN_METADATA_ADDR=0xa
 VITE_TOKEN_SYMBOL=MOVE
 VITE_TOKEN_DECIMALS=8
 ```
 
+And in the server `.env`:
+
+```
+TOKEN_METADATA=0xa
+PRICE_PER_TOKEN=1000
+SUGGESTED_DEPOSIT=100000
+```
+
 ## Notes
 
-- The server generates its own wallet and funds it from the testnet faucet (for gas to settle/close)
-- The server's `PRICE_PER_TOKEN` and `SUGGESTED_DEPOSIT` are in MOVE base units (8 decimals) by default — adjust for USDCx (6 decimals) if needed
+- The server generates its own ephemeral wallet and funds it from the testnet faucet (for gas to settle/close)
 - Your wallet needs USDCx (or MOVE) on Movement testnet to open a channel
+- Server and frontend token configs must match — if one uses USDCx, the other must too

@@ -108,6 +108,34 @@ cargo run --bin movement-sse-server    # Terminal 1
 cargo run --bin movement-sse-client    # Terminal 2
 ```
 
+### React Demo with Wallet Connection
+
+A browser-based demo that connects to the SSE server above. Users connect a Movement wallet, open a payment channel on-chain, and stream AI text paid with off-chain vouchers.
+
+```bash
+# Terminal 1 — start the SSE server (from repo root)
+cargo run --manifest-path examples/movement/Cargo.toml --bin movement-sse-server
+
+# Terminal 2 — start the React frontend
+cd examples/movement-demo
+pnpm install
+pnpm dev
+```
+
+Open http://localhost:5173, connect your wallet, and click **Start Streaming**.
+
+#### USDCx on Movement testnet
+
+Create `examples/movement/.env` to configure the server for USDCx (6 decimals) instead of MOVE:
+
+```
+TOKEN_METADATA=0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6
+PRICE_PER_TOKEN=10
+SUGGESTED_DEPOSIT=10000
+```
+
+The frontend defaults to USDCx already. To switch to MOVE, set `VITE_TOKEN_METADATA_ADDR=0xa`, `VITE_TOKEN_SYMBOL=MOVE`, and `VITE_TOKEN_DECIMALS=8` in `examples/movement-demo/.env`.
+
 ## On-Chain Contract
 
 The Movement payment method settles on the [TempoStreamChannel Move contract](https://github.com/andygolay/tempo-move) deployed on Movement testnet:
