@@ -1,0 +1,37 @@
+[package]
+name = "movement-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "movement-server"
+path = "src/server.rs"
+
+[[bin]]
+name = "movement-client"
+path = "src/client.rs"
+
+[[bin]]
+name = "movement-sse-server"
+path = "src/sse_server.rs"
+
+[[bin]]
+name = "movement-sse-client"
+path = "src/sse_client.rs"
+
+[dependencies]
+mpp = { path = "../..", features = ["movement", "client", "server"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+sha3 = "0.10"
+rand = "0.9"
+hex = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+axum = "0.8"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+futures = "0.3"
+async-stream = "0.3"
+urlencoding = "2"

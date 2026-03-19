@@ -23,10 +23,12 @@ use crate::protocol::core::{PaymentCredential, Receipt};
 use crate::protocol::intents::ChargeRequest;
 use crate::protocol::traits::{ChargeMethod, VerificationError};
 
+#[cfg(feature = "tempo")]
 const SECRET_KEY_ENV_VAR: &str = "MPP_SECRET_KEY";
 const DEFAULT_DECIMALS: u32 = 6;
 
 /// Environment variables checked (in order) to auto-detect the server realm.
+#[cfg(feature = "tempo")]
 const REALM_ENV_VARS: &[&str] = &[
     "MPP_REALM",
     "FLY_APP_NAME",
@@ -39,12 +41,14 @@ const REALM_ENV_VARS: &[&str] = &[
     "WEBSITE_HOSTNAME",
 ];
 
+#[cfg(feature = "tempo")]
 const DEFAULT_REALM: &str = "MPP Payment";
 
 /// Detect the server realm from environment variables.
 ///
 /// Checks platform-specific env vars in order (see [`REALM_ENV_VARS`]),
 /// falling back to `"MPP Payment"`.
+#[cfg(feature = "tempo")]
 pub(crate) fn detect_realm() -> String {
     for name in REALM_ENV_VARS {
         if let Ok(value) = std::env::var(name) {
@@ -731,25 +735,16 @@ mod tests {
 
     fn test_credential(secret_key: &str) -> PaymentCredential {
         let request = "eyJ0ZXN0IjoidmFsdWUifQ";
-        let id = {
-            #[cfg(feature = "tempo")]
-            {
-                crate::protocol::methods::tempo::generate_challenge_id(
-                    secret_key,
-                    "api.example.com",
-                    "mock",
-                    "charge",
-                    request,
-                    None,
-                    None,
-                    None,
-                )
-            }
-            #[cfg(not(feature = "tempo"))]
-            {
-                "test-id".to_string()
-            }
-        };
+        let id = crate::protocol::core::compute_challenge_id(
+            secret_key,
+            "api.example.com",
+            "mock",
+            "charge",
+            request,
+            None,
+            None,
+            None,
+        );
 
         let echo = ChallengeEcho {
             id,
@@ -968,25 +963,16 @@ mod tests {
         let raw = encoded.raw().to_string();
 
         let secret = "test-secret";
-        let id = {
-            #[cfg(feature = "tempo")]
-            {
-                crate::protocol::methods::tempo::generate_challenge_id(
-                    secret,
-                    "api.example.com",
-                    "mock",
-                    "charge",
-                    &raw,
-                    None,
-                    None,
-                    None,
-                )
-            }
-            #[cfg(not(feature = "tempo"))]
-            {
-                "test-id".to_string()
-            }
-        };
+        let id = crate::protocol::core::compute_challenge_id(
+            secret,
+            "api.example.com",
+            "mock",
+            "charge",
+            &raw,
+            None,
+            None,
+            None,
+        );
 
         let echo = ChallengeEcho {
             id,

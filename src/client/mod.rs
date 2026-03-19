@@ -23,6 +23,9 @@ mod provider;
 #[cfg(feature = "tempo")]
 pub mod tempo;
 
+#[cfg(feature = "movement")]
+pub mod movement;
+
 #[cfg(feature = "client")]
 mod fetch;
 
@@ -43,3 +46,7 @@ pub use middleware::PaymentMiddleware;
 pub use tempo::{AutoswapConfig, TempoClientError, TempoProvider};
 #[cfg(feature = "tempo")]
 pub use tempo_alloy::TempoNetwork;
+
+// Re-export Movement types at client level
+#[cfg(feature = "movement")]
+pub use movement::MovementProvider;

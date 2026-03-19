@@ -1,104 +1,138 @@
-<br>
-<br>
+# mpp-movement
 
-<p align="center">
-  <a href="https://mpp.dev">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/tempoxyz/mpp/refs/heads/main/public/lockup-light.svg">
-      <img alt="Machine Payments Protocol" src="https://raw.githubusercontent.com/tempoxyz/mpp/refs/heads/main/public/lockup-dark.svg" width="auto" height="120">
-    </picture>
-  </a>
-</p>
+Rust SDK for the [**Machine Payments Protocol (MPP)**](https://mpp.dev) on [Movement Network](https://movementnetwork.xyz).
 
-<br>
-<br>
+Fork of [tempoxyz/mpp-rs](https://github.com/tempoxyz/mpp-rs) with a `movement` payment method that uses ed25519 signatures, BCS serialization, and the [TempoStreamChannel](https://github.com/andygolay/tempo-move) Move contract for streaming payment channels.
 
-# mpp
+## What is MPP?
 
-Rust SDK for the [**Machine Payments Protocol**](https://mpp.dev)
+[MPP](https://mpp.dev) lets any client — agents, apps, or humans — pay for any service in the same HTTP request. It standardizes [HTTP 402 (Payment Required)](https://mpp.dev/protocol/http-402) with an open [IETF specification](https://paymentauth.org), so servers can charge and clients can pay without API keys, billing accounts, or checkout flows.
 
-[![Website](https://img.shields.io/badge/website-mpp.dev-black)](https://mpp.dev)
-[![Docs](https://img.shields.io/badge/docs-mpp.dev-blue)](https://mpp.dev/sdk/rust)
-[![Crates.io](https://img.shields.io/crates/v/mpp.svg)](https://crates.io/crates/mpp)
-[![License](https://img.shields.io/crates/l/mpp.svg)](LICENSE-MIT)
-
-[MPP](https://mpp.dev) lets any client — agents, apps, or humans — pay for any service in the same HTTP request. It standardizes [HTTP 402](https://mpp.dev/protocol/http-402) with an open [IETF specification](https://paymentauth.org), so servers can charge and clients can pay without API keys, billing accounts, or checkout flows.
-
-You can get started today by reading the [Rust SDK docs](https://mpp.dev/sdk/rust), exploring the [protocol overview](https://mpp.dev/protocol/), or jumping straight to the [quickstart](https://mpp.dev/quickstart/).
+This SDK adds Movement Network as a payment method alongside the original Tempo (EVM) support.
 
 ## Install
 
 ```bash
-cargo add mpp
+cargo add mpp --git https://github.com/andygolay/mpp-movement --features movement
 ```
 
 ## Quick Start
 
-### Server
+### Server (Axum)
 
 ```rust
-use mpp::server::{Mpp, tempo, TempoConfig};
+use mpp::protocol::methods::movement;
 
-let mpp = Mpp::create(tempo(TempoConfig {
-    recipient: "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-}))?;
+// Create a 402 challenge for 0.001 MOVE
+let challenge = movement::charge_challenge(
+    "my-server-secret",
+    "api.example.com",
+    "100000",       // 0.001 MOVE (8 decimals)
+    "0xa",          // MOVE token
+    "0xrecipient",
+)?;
 
-let challenge = mpp.charge("1")?;
-let receipt = mpp.verify_credential(&credential).await?;
+// Verify a payment credential (stateless HMAC check)
+let expected_id = mpp::compute_challenge_id(
+    "my-server-secret", realm, method, intent, request, expires, digest, opaque,
+);
+assert_eq!(credential.challenge.id, expected_id);
 ```
 
 ### Client
 
 ```rust
-use mpp::client::{PaymentMiddleware, TempoProvider};
-use reqwest_middleware::ClientBuilder;
+use mpp::client::MovementProvider;
 
-let provider = TempoProvider::new(signer, "https://rpc.moderato.tempo.xyz")?;
-let client = ClientBuilder::new(reqwest::Client::new())
-    .with(PaymentMiddleware::new(provider))
-    .build();
+let provider = MovementProvider::new(signing_key, "https://testnet.movementnetwork.xyz/v1")?;
 
-// Requests now handle 402 automatically
-let resp = client.get("https://mpp.dev/api/ping/paid").send().await?;
+// Provider handles 402 challenges automatically:
+// 1. Parse WWW-Authenticate header
+// 2. Build + sign Movement transaction
+// 3. Retry with payment credential
+```
+
+### Voucher Signing (Session Payments)
+
+```rust
+use mpp::protocol::methods::movement::voucher;
+
+// Sign a voucher (off-chain, matches on-chain TempoStreamChannel contract)
+let sig = voucher::sign_voucher(&signing_key, &channel_id, cumulative_amount);
+
+// Verify (server-side)
+let valid = voucher::verify_voucher(&channel_id, amount, &sig, &pubkey, &authorized_pubkey);
 ```
 
 ## Feature Flags
 
 | Feature | Description |
 |---------|-------------|
-| `client` | Client-side payment providers (`PaymentProvider` trait, `Fetch` extension) |
-| `server` | Server-side payment verification (`ChargeMethod` trait) |
-| `tempo` | [Tempo](https://tempo.xyz) blockchain support (includes `evm`) |
-| `evm` | Shared EVM utilities (Address, U256, parsing) |
-| `middleware` | reqwest-middleware support with `PaymentMiddleware` (implies `client`) |
+| `movement` | Movement Network support (ed25519, BCS, sha3-256) |
+| `client` | Client-side payment providers + Movement REST client |
+| `server` | Server-side session method, channel store, verification |
+| `tempo` | Original Tempo (EVM) blockchain support |
+| `evm` | Shared EVM utilities |
+| `middleware` | reqwest-middleware with `PaymentMiddleware` |
 | `tower` | Tower middleware for server-side integration |
-| `axum` | Axum extractor support for server-side convenience |
-| `utils` | Hex/random utilities for development and testing |
+| `axum` | Axum extractor support |
 
-## Payment Methods
+## Movement vs Tempo
 
-MPP supports multiple [payment methods](https://mpp.dev/payment-methods/) through one protocol — [Tempo](https://mpp.dev/payment-methods/tempo/), [Stripe](https://mpp.dev/payment-methods/stripe/), [Lightning](https://mpp.dev/payment-methods/lightning/), [Card](https://mpp.dev/payment-methods/card/), and [custom methods](https://mpp.dev/payment-methods/custom). The server advertises which methods it accepts, and the client chooses which one to pay with. This SDK currently implements Tempo (charge and session intents).
+| Aspect | Tempo (EVM) | Movement |
+|--------|-------------|----------|
+| Signature | EIP-712 + ECDSA | ed25519 |
+| Serialization | ABI encoding | BCS |
+| Hash | keccak256 | sha3-256 |
+| Token standard | TIP-20 (ERC-20) | Fungible Asset (FA) |
+| Address format | 20-byte | 32-byte |
+| Contract | Solidity TempoStreamChannel | [Move TempoStreamChannel](https://github.com/andygolay/tempo-move) |
+
+## Examples
+
+See [`examples/`](./examples/) for runnable demos. All examples run against Movement testnet with real on-chain transactions.
+
+### Fortune Teller (one-time payment via HTTP 402)
+
+```bash
+cd examples/movement
+cargo run --bin movement-server    # Terminal 1
+cargo run --bin movement-client    # Terminal 2
+```
+
+### Pay-Per-Token LLM Streaming (session payments with vouchers)
+
+```bash
+cd examples/movement
+cargo run --bin movement-sse-server    # Terminal 1
+cargo run --bin movement-sse-client    # Terminal 2
+```
+
+## On-Chain Contract
+
+The Movement payment method settles on the [TempoStreamChannel Move contract](https://github.com/andygolay/tempo-move) deployed on Movement testnet:
+
+```
+Module: 0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58
+Token:  0xa (MOVE)
+```
+
+Entry functions: `open`, `settle`, `top_up`, `close`, `request_close`, `withdraw`
 
 ## Protocol
 
-Built on the ["Payment" HTTP Authentication Scheme](https://paymentauth.org), an open specification proposed to the IETF. See [mpp.dev/protocol](https://mpp.dev/protocol/) for the full protocol overview, or the [IETF specification](https://paymentauth.org) for the wire format.
+Built on the ["Payment" HTTP Authentication Scheme](https://paymentauth.org), an open specification proposed to the IETF. See [mpp.dev/protocol](https://mpp.dev/protocol/) for the protocol overview.
 
 ## Contributing
 
-```
-git clone https://github.com/tempoxyz/mpp-rs
-cd mpp-rs
-cargo test
+```bash
+git clone https://github.com/andygolay/mpp-movement
+cd mpp-movement
+cargo test --features movement,server,client
 ```
 
-## Security
-
-See [`SECURITY.md`](./SECURITY.md) for reporting vulnerabilities.
+321 tests, all passing.
 
 ## License
 
 Licensed under either of [Apache License, Version 2.0](./LICENSE-APACHE) or [MIT License](./LICENSE-MIT) at your option.
-
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in these crates by you, as defined in the Apache-2.0 license,
-shall be dual licensed as above, without any additional terms or conditions.

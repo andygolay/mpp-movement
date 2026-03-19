@@ -2,11 +2,10 @@
 name = "mpp"
 version = "0.5.0"
 edition = "2021"
-description = "Rust SDK for the Machine Payments Protocol (MPP)"
+description = "Rust SDK for the Machine Payments Protocol (MPP) — with Movement Network support"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/tempoxyz/mpp-rs"
-homepage = "https://github.com/tempoxyz/mpp-rs"
-documentation = "https://tempoxyz.github.io/mpp-rs"
+repository = "https://github.com/andygolay/mpp-movement"
+homepage = "https://github.com/andygolay/mpp-movement"
 readme = "README.md"
 keywords = ["http", "payments", "402", "authentication"]
 categories = ["web-programming", "authentication", "cryptography"]
@@ -21,6 +20,7 @@ server = ["tokio", "futures-core", "async-stream"]
 # Method implementations
 evm = ["alloy", "hex", "rand"]
 tempo = ["evm", "tempo-alloy", "tempo-primitives", "uuid"]
+movement = ["ed25519-dalek", "sha3", "rand", "hex"]
 
 # Utilities
 utils = ["hex", "rand"]
@@ -56,6 +56,10 @@ tokio = { version = "1", features = ["rt", "sync", "time", "macros"], optional =
 futures-core = { version = "0.3", optional = true }
 async-stream = { version = "0.3", optional = true }
 alloy = { version = "1.2", features = ["full"], optional = true }
+
+# Movement dependencies (optional)
+ed25519-dalek = { version = "2", features = ["rand_core"], optional = true }
+sha3 = { version = "0.10", optional = true }
 
 # Tempo dependencies (optional)
 # Note: tempo feature requires git dependency - add to your Cargo.toml:
