@@ -235,8 +235,8 @@ impl IntoResponse for MppChargeRejection {
 
 /// Trait for generating payment challenges and verifying credentials.
 ///
-/// Implemented automatically for `Mpp<TempoChargeMethod<P>, S>` when
-/// the `tempo` feature is enabled. Can also be implemented manually
+/// Implemented automatically for `Mpp<MovementChargeMethod, S>` when
+/// the `movement` feature is enabled. Can also be implemented manually
 /// for custom payment methods.
 ///
 /// The extractors require `Arc<dyn ChargeChallenger>` in router state.
@@ -255,10 +255,9 @@ pub trait ChargeChallenger: Send + Sync + 'static {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Receipt, String>> + Send>>;
 }
 
-#[cfg(feature = "tempo")]
-impl<P, S> ChargeChallenger for super::Mpp<super::TempoChargeMethod<P>, S>
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+impl<S> ChargeChallenger for super::Mpp<super::MovementChargeMethod, S>
 where
-    P: alloy::providers::Provider<tempo_alloy::TempoNetwork> + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
 {
     fn challenge(
@@ -266,7 +265,7 @@ where
         amount: &str,
         options: ChallengeOptions,
     ) -> Result<PaymentChallenge, String> {
-        self.charge_with_options(
+        self.movement_charge_with_options(
             amount,
             super::ChargeOptions {
                 description: options.description,

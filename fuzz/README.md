@@ -43,7 +43,7 @@ Seed corpus files are stored in `fuzz/corpus/<target>/`. To seed the corpus with
 
 ```bash
 mkdir -p fuzz/corpus/fuzz_www_authenticate
-echo -n 'Payment id="abc", realm="api", method="tempo", intent="charge", request="e30"' > fuzz/corpus/fuzz_www_authenticate/valid_header
+echo -n 'Payment id="abc", realm="api", method="movement", intent="charge", request="e30"' > fuzz/corpus/fuzz_www_authenticate/valid_header
 ```
 
 ## Coverage

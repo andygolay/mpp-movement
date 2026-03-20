@@ -5,12 +5,12 @@ edition = "2021"
 publish = false
 
 [[bin]]
-name = "movement-server"
-path = "src/server.rs"
+name = "movement-payment-server"
+path = "src/payment_server.rs"
 
 [[bin]]
-name = "movement-client"
-path = "src/client.rs"
+name = "movement-payment-client"
+path = "src/payment_client.rs"
 
 [[bin]]
 name = "movement-sse-server"
@@ -20,8 +20,16 @@ path = "src/sse_server.rs"
 name = "movement-sse-client"
 path = "src/sse_client.rs"
 
+[[bin]]
+name = "movement-multifetch-server"
+path = "src/multifetch_server.rs"
+
+[[bin]]
+name = "movement-multifetch-client"
+path = "src/multifetch_client.rs"
+
 [dependencies]
-mpp = { path = "../..", features = ["movement", "client", "server"] }
+mpp = { path = "../..", features = ["movement", "client", "server", "axum"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 sha3 = "0.10"
 rand = "0.9"

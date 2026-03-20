@@ -1,20 +1,13 @@
 //! mpp - Machine Payment Protocol for Rust
 //!
-//! A Rust library implementing the Web Payment Auth protocol.
+//! A Rust library implementing the Web Payment Auth protocol
+//! with Movement Network support.
 //!
 //! # Quick Start
 //!
 //! ```no_run
 //! use mpp::{PaymentChallenge, PaymentCredential, Receipt, ChargeRequest};
 //! use mpp::{parse_www_authenticate, format_authorization};
-//! # fn main() {}
-//! ```
-//!
-//! # Signer Integration
-//!
-#![cfg_attr(feature = "evm", doc = "```no_run")]
-#![cfg_attr(not(feature = "evm"), doc = "```ignore")]
-//! use mpp::{Signer, PrivateKeySigner};
 //! # fn main() {}
 //! ```
 //!
@@ -32,17 +25,11 @@ pub mod protocol;
 pub mod proxy;
 pub mod store;
 
-#[cfg(feature = "evm")]
-pub mod evm;
-
 #[cfg(feature = "client")]
 pub mod client;
 
 #[cfg(feature = "server")]
 pub mod server;
-
-#[cfg(feature = "tempo")]
-pub mod tempo;
 
 // ==================== Flat Re-exports ====================
 
@@ -80,26 +67,9 @@ pub use protocol::core::{
 // Store types
 pub use store::{FileStore, MemoryStore, Store, StoreError};
 
-#[cfg(all(feature = "server", feature = "tempo"))]
-pub use store::ChannelStoreAdapter;
-
 // Intent types
 pub use protocol::intents::{
     deserialize_request, deserialize_request_typed, parse_units, request_from_challenge,
     request_from_challenge_typed, serialize_request, ChargeRequest, Request as PaymentRequest,
     SessionRequest,
 };
-
-// ==================== Alloy Re-exports ====================
-
-#[cfg(feature = "evm")]
-pub use alloy::signers::Signer;
-
-#[cfg(feature = "evm")]
-pub use alloy::signers::local::PrivateKeySigner;
-
-#[cfg(feature = "evm")]
-pub use alloy::primitives::{Address, U256};
-
-#[cfg(feature = "tempo")]
-pub use alloy::providers::{ProviderBuilder, RootProvider};

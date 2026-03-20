@@ -56,7 +56,7 @@ Releases are **not scheduled** - they happen when you merge the RC PR:
 | Artifact | Location | When |
 |----------|----------|------|
 | Crate | [crates.io/crates/mpp](https://crates.io/crates/mpp) | RC PR merged |
-| GitHub Release | [Releases page](https://github.com/tempoxyz/mpp-rs/releases) | RC PR merged |
+| GitHub Release | [Releases page](https://github.com/andygolay/mpp-movement/releases) | RC PR merged |
 | Changelog | `CHANGELOG.md` in repo | RC PR merged |
 | Git tag | `mpp@x.y.z` | RC PR merged |
 

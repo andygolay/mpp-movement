@@ -51,40 +51,11 @@
 //!     println!("Amount: {}", req.amount);
 //! }
 //! ```
-//!
-//! ## EVM-specific accessors (with "evm" feature)
-//!
-#![cfg_attr(feature = "tempo", doc = "```")]
-#![cfg_attr(not(feature = "tempo"), doc = "```ignore")]
-//! use mpp::protocol::core::parse_www_authenticate;
-//! use mpp::protocol::intents::ChargeRequest;
-//! use mpp::protocol::methods::tempo::TempoChargeExt;
-//! use mpp::evm::U256;
-//!
-//! let header = r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiIweDEyMyIsInJlY2lwaWVudCI6IjB4NDU2In0""#;
-//! let challenge = parse_www_authenticate(header).unwrap();
-//! let req: ChargeRequest = challenge.request.decode().unwrap();
-//! let amount: U256 = req.amount_u256().unwrap();
-//! ```
-//!
-//! ## Tempo-specific accessors (with "tempo" feature)
-//!
-#![cfg_attr(feature = "tempo", doc = "```")]
-#![cfg_attr(not(feature = "tempo"), doc = "```ignore")]
-//! use mpp::protocol::core::parse_www_authenticate;
-//! use mpp::protocol::intents::ChargeRequest;
-//! use mpp::protocol::methods::tempo::TempoChargeExt;
-//!
-//! let header = r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJVU0QifQ""#;
-//! let challenge = parse_www_authenticate(header).unwrap();
-//! let req: ChargeRequest = challenge.request.decode().unwrap();
-//! assert!(!req.fee_payer());
-//! ```
 
 pub mod core;
 pub mod intents;
 
-#[cfg(any(feature = "server", feature = "tempo", feature = "movement"))]
+#[cfg(any(feature = "server", feature = "movement"))]
 pub mod methods;
 
 #[cfg(feature = "server")]

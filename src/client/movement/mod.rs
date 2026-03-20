@@ -12,9 +12,19 @@
 //! let resp = client.get(url).send_with_payment(&provider).await?;
 //! ```
 
+pub mod session;
+
 use ed25519_dalek::SigningKey;
 
 use crate::client::PaymentProvider;
+pub use session::MovementSessionProvider;
+
+macro_rules! mpp_info {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "observability")]
+        tracing::info!($($arg)*);
+    };
+}
 use crate::error::MppError;
 use crate::protocol::core::{PaymentChallenge, PaymentCredential, PaymentPayload};
 use crate::protocol::intents::ChargeRequest;
@@ -72,6 +82,7 @@ impl MovementProvider {
     }
 
     /// Execute a charge payment: transfer tokens to the recipient.
+    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, challenge), fields(intent = "charge")))]
     async fn pay_charge(
         &self,
         challenge: &PaymentChallenge,
@@ -79,22 +90,17 @@ impl MovementProvider {
         let request: ChargeRequest = challenge.request.decode()?;
         let amount = request.amount_u64()?;
         let recipient = request.recipient_str()?.to_string();
-        let _currency = request.currency_str();
+        let currency = request.currency_str();
 
-        // Build a transfer transaction.
-        // Use aptos_account::transfer which handles both coin and FA.
-        let payload = EntryFunctionPayload::new(
-            "0x1::aptos_account::transfer",
-            vec![
-                serde_json::json!(recipient),
-                serde_json::json!(amount.to_string()),
-            ],
-        );
+        // Build the transfer payload based on the token type.
+        let payload = build_transfer_payload(currency, &recipient, amount);
 
+        mpp_info!(recipient = %recipient, amount = amount, "submitting charge payment");
         let tx_hash = self
             .rest_client
             .build_sign_submit(&self.signing_key, &self.sender_address, payload)
             .await?;
+        mpp_info!(tx_hash = %tx_hash, "charge payment confirmed");
 
         let echo = challenge.to_echo();
         Ok(PaymentCredential::new(
@@ -103,11 +109,24 @@ impl MovementProvider {
         ))
     }
 
-    /// Execute a session open: call channel::open on the Move contract.
-    #[allow(dead_code)]
-    async fn pay_session_open(
+    // ==================== Session / Channel Operations ====================
+
+    /// Open a payment channel on-chain.
+    ///
+    /// Returns `(tx_hash, channel_id)` where `channel_id` is the 32-byte
+    /// deterministic ID derived from the channel parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `module_address` - Address where TempoStreamChannel is deployed
+    /// * `registry_address` - Registry address (usually same as module)
+    /// * `payee` - Recipient/server address
+    /// * `token_metadata` - FA metadata address (e.g., `"0xa"` for MOVE)
+    /// * `deposit` - Initial deposit in base units
+    /// * `salt` - Random salt for channel ID uniqueness
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_channel(
         &self,
-        _challenge: &PaymentChallenge,
         module_address: &str,
         registry_address: &str,
         payee: &str,
@@ -129,6 +148,7 @@ impl MovementProvider {
             ],
         );
 
+        mpp_info!(payee = %payee, deposit = deposit, "opening payment channel");
         let tx_hash = self
             .rest_client
             .build_sign_submit(&self.signing_key, &self.sender_address, payload)
@@ -146,7 +166,68 @@ impl MovementProvider {
             &pubkey_bytes,
         );
 
+        mpp_info!(tx_hash = %tx_hash, channel_id = %hex::encode(channel_id), "channel opened");
         Ok((tx_hash, channel_id.to_vec()))
+    }
+
+    /// Settle a payment channel on-chain with the latest voucher.
+    ///
+    /// Called by the payee (server) to claim accumulated payments.
+    /// Returns the settlement transaction hash.
+    pub async fn settle_channel(
+        &self,
+        module_address: &str,
+        registry_address: &str,
+        channel_id: &[u8],
+        cumulative_amount: u64,
+        signature: &[u8],
+        authorized_pubkey: &[u8],
+    ) -> Result<String, MppError> {
+        let payload = EntryFunctionPayload::new(
+            &format!("{}::channel::settle", module_address),
+            vec![
+                serde_json::json!(registry_address),
+                serde_json::json!(format!("0x{}", hex::encode(channel_id))),
+                serde_json::json!(cumulative_amount.to_string()),
+                serde_json::json!(format!("0x{}", hex::encode(signature))),
+                serde_json::json!(format!("0x{}", hex::encode(authorized_pubkey))),
+            ],
+        );
+
+        mpp_info!(cumulative_amount = cumulative_amount, "settling channel");
+        self.rest_client
+            .build_sign_submit(&self.signing_key, &self.sender_address, payload)
+            .await
+    }
+
+    /// Close a payment channel on-chain.
+    ///
+    /// Called by the payee (server) to finalize and close the channel.
+    /// Returns the close transaction hash.
+    pub async fn close_channel(
+        &self,
+        module_address: &str,
+        registry_address: &str,
+        channel_id: &[u8],
+        cumulative_amount: u64,
+        signature: &[u8],
+        authorized_pubkey: &[u8],
+    ) -> Result<String, MppError> {
+        let payload = EntryFunctionPayload::new(
+            &format!("{}::channel::close", module_address),
+            vec![
+                serde_json::json!(registry_address),
+                serde_json::json!(format!("0x{}", hex::encode(channel_id))),
+                serde_json::json!(cumulative_amount.to_string()),
+                serde_json::json!(format!("0x{}", hex::encode(signature))),
+                serde_json::json!(format!("0x{}", hex::encode(authorized_pubkey))),
+            ],
+        );
+
+        mpp_info!(cumulative_amount = cumulative_amount, "closing channel");
+        self.rest_client
+            .build_sign_submit(&self.signing_key, &self.sender_address, payload)
+            .await
     }
 
     /// Sign a voucher for a session payment.
@@ -157,6 +238,11 @@ impl MovementProvider {
     /// Get the ed25519 public key bytes.
     pub fn public_key_bytes(&self) -> [u8; 32] {
         self.signing_key.verifying_key().to_bytes()
+    }
+
+    /// Get a reference to the signing key.
+    pub fn signing_key(&self) -> &SigningKey {
+        &self.signing_key
     }
 }
 
@@ -185,6 +271,45 @@ impl PaymentProvider for MovementProvider {
     }
 }
 
+/// Build the appropriate transfer payload for the given token.
+///
+/// - Native MOVE (`0xa`): uses `aptos_account::transfer` (2 args: recipient, amount)
+/// - Any other FA token: uses `primary_fungible_store::transfer` (3 args: metadata, recipient, amount)
+fn build_transfer_payload(currency: &str, recipient: &str, amount: u64) -> EntryFunctionPayload {
+    if is_native_move(currency) {
+        // Native MOVE token — use the simple transfer
+        EntryFunctionPayload::new(
+            "0x1::aptos_account::transfer",
+            vec![
+                serde_json::json!(recipient),
+                serde_json::json!(amount.to_string()),
+            ],
+        )
+    } else {
+        // Fungible Asset token — use primary_fungible_store::transfer
+        // with the FA metadata address as the first argument
+        EntryFunctionPayload::new(
+            "0x1::primary_fungible_store::transfer",
+            vec![
+                serde_json::json!(currency),
+                serde_json::json!(recipient),
+                serde_json::json!(amount.to_string()),
+            ],
+        ).with_type_arguments(vec!["0x1::fungible_asset::Metadata".to_string()])
+    }
+}
+
+/// Check if a currency address is the native MOVE token.
+///
+/// The native MOVE token has the special FA metadata address `0xa`
+/// (which is `0x000...00a` when fully expanded).
+fn is_native_move(currency: &str) -> bool {
+    let hex = currency.strip_prefix("0x").unwrap_or(currency);
+    // Normalize: strip leading zeros and compare
+    let trimmed = hex.trim_start_matches('0');
+    trimmed.eq_ignore_ascii_case("a")
+}
+
 /// Derive an Aptos account address from an ed25519 public key.
 ///
 /// address = sha3_256(pubkey || 0x00)  (scheme byte for ed25519)
@@ -198,7 +323,6 @@ fn derive_address(pubkey: &[u8; 32]) -> String {
 }
 
 /// Parse a hex address string to a 32-byte array.
-#[allow(dead_code)]
 fn parse_address_bytes(addr: &str) -> Result<[u8; 32], MppError> {
     let hex_str = addr.strip_prefix("0x").unwrap_or(addr);
     // Pad to 64 hex chars (32 bytes) if short (e.g., "0xa" → 32 bytes).
@@ -281,5 +405,40 @@ mod tests {
             &[],
         );
         assert!(valid);
+    }
+
+    #[test]
+    fn test_is_native_move() {
+        assert!(is_native_move("0xa"));
+        assert!(is_native_move("0x0a"));
+        assert!(is_native_move("0x000000000000000000000000000000000000000000000000000000000000000a"));
+        assert!(is_native_move("0xA"));
+        assert!(is_native_move("a"));
+        assert!(!is_native_move("0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6"));
+        assert!(!is_native_move("0xc6f5b46ab5307dfe3e565668edcc1461b31cac5a6c2739fba17d9fdde16813a2"));
+        assert!(!is_native_move("0x1"));
+        assert!(!is_native_move("0xab"));
+    }
+
+    #[test]
+    fn test_build_transfer_payload_native() {
+        let payload = build_transfer_payload("0xa", "0xrecipient", 1000);
+        assert_eq!(payload.function, "0x1::aptos_account::transfer");
+        assert_eq!(payload.arguments.len(), 2);
+        assert!(payload.type_arguments.is_empty());
+    }
+
+    #[test]
+    fn test_build_transfer_payload_fa_token() {
+        let usdc_metadata = "0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6";
+        let payload = build_transfer_payload(usdc_metadata, "0xrecipient", 500);
+        assert_eq!(payload.function, "0x1::primary_fungible_store::transfer");
+        assert_eq!(payload.arguments.len(), 3);
+        // First arg is the metadata address
+        assert_eq!(payload.arguments[0].as_str().unwrap(), usdc_metadata);
+        // Second arg is the recipient
+        assert_eq!(payload.arguments[1].as_str().unwrap(), "0xrecipient");
+        // Type argument for FA
+        assert_eq!(payload.type_arguments, vec!["0x1::fungible_asset::Metadata"]);
     }
 }

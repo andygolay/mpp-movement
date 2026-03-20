@@ -37,6 +37,9 @@ pub mod voucher;
 #[cfg(feature = "client")]
 pub mod rest_client;
 
+#[cfg(all(feature = "server", feature = "client"))]
+pub mod method;
+
 #[cfg(feature = "server")]
 pub mod session_method;
 
@@ -49,10 +52,13 @@ pub use voucher::{compute_channel_id, sign_voucher, verify_voucher};
 #[cfg(feature = "client")]
 pub use rest_client::MovementRestClient;
 
+#[cfg(all(feature = "server", feature = "client"))]
+pub use method::ChargeMethod;
+
 #[cfg(feature = "server")]
 pub use session_method::{
-    ChannelState, ChannelStore, InMemoryChannelStore, SessionMethod, SessionMethodConfig,
-    deduct_from_channel,
+    ChannelState, ChannelStore, InMemoryChannelStore, OnChainTransaction, SessionMethod,
+    SessionMethodConfig, deduct_from_channel, verify_transaction_on_chain,
 };
 
 /// Payment method name for Movement.
@@ -77,8 +83,22 @@ pub const DEFAULT_FAUCET_URL_TESTNET: &str = "https://faucet.testnet.movementnet
 pub const MOVE_TOKEN_METADATA: &str = "0xa";
 
 /// Default deployed TempoStreamChannel module address (testnet).
-pub const DEFAULT_MODULE_ADDRESS: &str =
+pub const DEFAULT_MODULE_ADDRESS: &str = DEFAULT_MODULE_ADDRESS_TESTNET;
+
+/// Default module address for Movement testnet.
+pub const DEFAULT_MODULE_ADDRESS_TESTNET: &str =
     "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58";
+
+/// Default module address for Movement mainnet.
+///
+/// NOTE: The mainnet contract has not been deployed yet. This currently
+/// points to the testnet address as a placeholder. Set `MOVEMENT_MODULE_ADDRESS`
+/// env var or use `SessionMethodConfig::from_env()` to override.
+pub const DEFAULT_MODULE_ADDRESS_MAINNET: &str =
+    "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58";
+
+/// Environment variable for overriding the module address.
+pub const MODULE_ADDRESS_ENV_VAR: &str = "MOVEMENT_MODULE_ADDRESS";
 
 /// Default challenge expiration in minutes.
 pub const DEFAULT_EXPIRES_MINUTES: u64 = 5;

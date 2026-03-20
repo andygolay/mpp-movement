@@ -2,57 +2,81 @@
 
 Rust SDK for the [**Machine Payments Protocol (MPP)**](https://mpp.dev) on [Movement Network](https://movementnetwork.xyz).
 
-Fork of [tempoxyz/mpp-rs](https://github.com/tempoxyz/mpp-rs) with a `movement` payment method that uses ed25519 signatures, BCS serialization, and the [TempoStreamChannel](https://github.com/andygolay/tempo-move) Move contract for streaming payment channels.
+Lets any client — agents, apps, or humans — pay for any service in the same HTTP request using [HTTP 402 (Payment Required)](https://mpp.dev/protocol/http-402). Supports one-time charges, streaming payments via payment channels, and any Fungible Asset token (MOVE, USDC.e, USDCx, etc.).
 
-## What is MPP?
-
-[MPP](https://mpp.dev) lets any client — agents, apps, or humans — pay for any service in the same HTTP request. It standardizes [HTTP 402 (Payment Required)](https://mpp.dev/protocol/http-402) with an open [IETF specification](https://paymentauth.org), so servers can charge and clients can pay without API keys, billing accounts, or checkout flows.
-
-This SDK adds Movement Network as a payment method alongside the original Tempo (EVM) support.
+Built on the [TempoStreamChannel](https://github.com/andygolay/tempo-move) Move contract for on-chain payment channel settlement.
 
 ## Install
 
 ```bash
-cargo add mpp --git https://github.com/andygolay/mpp-movement --features movement
+cargo add mpp --git https://github.com/andygolay/mpp-movement --features movement,client,server
 ```
 
 ## Quick Start
 
-### Server (Axum)
+### Server
 
 ```rust
-use mpp::protocol::methods::movement;
+use mpp::server::{Mpp, movement, MovementConfig};
 
-// Create a 402 challenge for 0.001 MOVE
-let challenge = movement::charge_challenge(
-    "my-server-secret",
-    "api.example.com",
-    "100000",       // 0.001 MOVE (8 decimals)
-    "0xa",          // MOVE token
-    "0xrecipient",
-)?;
+// Create a payment handler — currency, realm, secret all have smart defaults
+let mpp = Mpp::create_movement(movement(MovementConfig {
+    recipient: "0x3e9e...",
+})
+.rest_url("https://testnet.movementnetwork.xyz/v1")
+.secret_key("my-secret"))?;
 
-// Verify a payment credential (stateless HMAC check)
-let expected_id = mpp::compute_challenge_id(
-    "my-server-secret", realm, method, intent, request, expires, digest, opaque,
-);
-assert_eq!(credential.challenge.id, expected_id);
+// Generate a charge challenge for $0.10
+let challenge = mpp.movement_charge("0.10")?;
 ```
 
-### Client
+With the Axum extractor, you can gate any route behind a payment in one line:
 
 ```rust
-use mpp::client::MovementProvider;
+use mpp::server::axum::{MppCharge, ChargeConfig};
+
+struct TenCents;
+impl ChargeConfig for TenCents {
+    fn amount() -> &'static str { "0.10" }
+}
+
+async fn paid_endpoint(charge: MppCharge<TenCents>) -> &'static str {
+    "You paid! Here's your content."
+}
+```
+
+### Client (one-time charge)
+
+```rust
+use mpp::client::{Fetch, MovementProvider};
 
 let provider = MovementProvider::new(signing_key, "https://testnet.movementnetwork.xyz/v1")?;
 
-// Provider handles 402 challenges automatically:
-// 1. Parse WWW-Authenticate header
-// 2. Build + sign Movement transaction
-// 3. Retry with payment credential
+// Automatic 402 handling: GET → 402 → pay on-chain → retry with credential → 200
+let resp = client.get(url).send_with_payment(&provider).await?;
 ```
 
-### Voucher Signing (Session Payments)
+Works with any FA token — the SDK picks the right transfer function (`aptos_account::transfer` for native MOVE, `primary_fungible_store::transfer` for USDC.e, USDCx, etc.).
+
+### Client (session / streaming)
+
+```rust
+use mpp::client::{Fetch, MovementSessionProvider};
+
+let session = MovementSessionProvider::new(signing_key, rest_url)?
+    .with_max_deposit(1_000_000);
+
+// First request: opens payment channel on-chain automatically
+let resp = client.get(url).send_with_payment(&session).await?;
+
+// Subsequent requests: off-chain vouchers, no gas!
+let resp = client.get(url).send_with_payment(&session).await?;
+let resp = client.get(url).send_with_payment(&session).await?;
+
+println!("Total spent: {} base units", session.cumulative());
+```
+
+### Voucher Signing
 
 ```rust
 use mpp::protocol::methods::movement::voucher;
@@ -69,38 +93,41 @@ let valid = voucher::verify_voucher(&channel_id, amount, &sig, &pubkey, &authori
 | Feature | Description |
 |---------|-------------|
 | `movement` | Movement Network support (ed25519, BCS, sha3-256) |
-| `client` | Client-side payment providers + Movement REST client |
-| `server` | Server-side session method, channel store, verification |
-| `tempo` | Original Tempo (EVM) blockchain support |
-| `evm` | Shared EVM utilities |
-| `middleware` | reqwest-middleware with `PaymentMiddleware` |
+| `client` | Client-side payment providers + REST client |
+| `server` | Server-side session method, channel store, SSE metering |
+| `axum` | Axum extractor for per-route payment gating |
 | `tower` | Tower middleware for server-side integration |
-| `axum` | Axum extractor support |
-
-## Movement vs Tempo
-
-| Aspect | Tempo (EVM) | Movement |
-|--------|-------------|----------|
-| Signature | EIP-712 + ECDSA | ed25519 |
-| Serialization | ABI encoding | BCS |
-| Hash | keccak256 | sha3-256 |
-| Token standard | TIP-20 (ERC-20) | Fungible Asset (FA) |
-| Address format | 20-byte | 32-byte |
-| Contract | Solidity TempoStreamChannel | [Move TempoStreamChannel](https://github.com/andygolay/tempo-move) |
+| `middleware` | reqwest-middleware with `PaymentMiddleware` |
+| `observability` | Structured logging via `tracing` (zero-cost when disabled) |
+| `utils` | Hex/rand utilities |
 
 ## Examples
 
-See [`examples/`](./examples/) for runnable demos. All examples run against Movement testnet with real on-chain transactions.
+All examples run against Movement testnet with real on-chain transactions. See [`examples/movement/`](./examples/movement/).
 
-### Fortune Teller (one-time payment via HTTP 402)
+### Fortune Teller (one-time charge)
+
+Server uses `Mpp::create_movement()` + Axum `MppCharge` extractor. Client uses `MovementProvider` + `send_with_payment()`.
 
 ```bash
 cd examples/movement
-cargo run --bin movement-server    # Terminal 1
-cargo run --bin movement-client    # Terminal 2
+cargo run --bin movement-payment-server    # Terminal 1
+cargo run --bin movement-payment-client    # Terminal 2
 ```
 
-### Pay-Per-Token LLM Streaming (session payments with vouchers)
+### Multi-Fetch Scraper (session payments)
+
+Server verifies vouchers via `SessionMethod`. Client uses `MovementSessionProvider` — opens a channel on the first request, then sends off-chain vouchers for subsequent requests.
+
+```bash
+cd examples/movement
+cargo run --bin movement-multifetch-server    # Terminal 1
+cargo run --bin movement-multifetch-client    # Terminal 2
+```
+
+### Pay-Per-Token LLM Streaming (SSE + payment channels)
+
+Server streams tokens via Server-Sent Events, settling vouchers on-chain periodically. Client opens a channel and pays per token batch.
 
 ```bash
 cd examples/movement
@@ -108,69 +135,57 @@ cargo run --bin movement-sse-server    # Terminal 1
 cargo run --bin movement-sse-client    # Terminal 2
 ```
 
-### React Demo with Wallet Connection
+### React Demo
 
-A browser-based demo that connects to the SSE server above. Users connect a Movement wallet, open a payment channel on-chain, and stream AI text paid with off-chain vouchers.
-
-```bash
-# Terminal 1 — start the SSE server (from repo root)
-cargo run --manifest-path examples/movement/Cargo.toml --bin movement-sse-server
-
-# Terminal 2 — start the React frontend
-cd examples/movement-demo
-pnpm install
-pnpm dev
-```
-
-Open http://localhost:5173, connect your wallet, and click **Start Streaming**.
-
-#### USDCx on Movement testnet
-
-Create `examples/movement/.env` to configure the server for USDCx (6 decimals) instead of MOVE:
-
-```
-TOKEN_METADATA=0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6
-PRICE_PER_TOKEN=10
-SUGGESTED_DEPOSIT=10000
-```
-
-The frontend defaults to USDCx already. To switch to MOVE, set `VITE_TOKEN_METADATA_ADDR=0xa`, `VITE_TOKEN_SYMBOL=MOVE`, and `VITE_TOKEN_DECIMALS=8` in `examples/movement-demo/.env`.
-
-#### USDC.e on Movement testnet
-
-To use USDC.e (6 decimals), copy the ready-made env files:
+A browser-based demo that connects to the SSE server. Users connect a Movement wallet, open a payment channel, and stream AI text paid with off-chain vouchers.
 
 ```bash
-cp examples/movement/.env.usdc-e examples/movement/.env
-cp examples/movement-demo/.env.usdc-e examples/movement-demo/.env
+cargo run --manifest-path examples/movement/Cargo.toml --bin movement-sse-server  # Terminal 1
+cd examples/movement-demo && pnpm install && pnpm dev                              # Terminal 2
 ```
 
-Or set manually — server `examples/movement/.env`:
-
-```
-TOKEN_METADATA=0xc6f5b46ab5307dfe3e565668edcc1461b31cac5a6c2739fba17d9fdde16813a2
-PRICE_PER_TOKEN=10
-SUGGESTED_DEPOSIT=10000
-```
-
-Frontend `examples/movement-demo/.env`:
-
-```
-VITE_TOKEN_METADATA_ADDR=0xc6f5b46ab5307dfe3e565668edcc1461b31cac5a6c2739fba17d9fdde16813a2
-VITE_TOKEN_SYMBOL=USDC.e
-VITE_TOKEN_DECIMALS=6
-```
+Open http://localhost:5173. Supports MOVE, USDCx, and USDC.e — configure via `.env` files (see [`examples/movement/.env.example`](./examples/movement/.env.example)).
 
 ## On-Chain Contract
 
-The Movement payment method settles on the [TempoStreamChannel Move contract](https://github.com/andygolay/tempo-move) deployed on Movement testnet:
+Settles on the [TempoStreamChannel Move contract](https://github.com/andygolay/tempo-move) deployed on Movement testnet:
 
 ```
 Module: 0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58
-Token:  0xa (MOVE)
 ```
 
 Entry functions: `open`, `settle`, `top_up`, `close`, `request_close`, `withdraw`
+
+Supports any Fungible Asset token. Default: MOVE (`0xa`).
+
+## Architecture
+
+```
+src/
+├── protocol/          # Core HTTP 402 protocol (headers, types, traits)
+│   ├── core/          # Challenge, credential, receipt parsing/formatting
+│   ├── intents/       # ChargeRequest, SessionRequest schemas
+│   ├── traits/        # ChargeMethod, SessionMethod traits
+│   └── methods/
+│       └── movement/  # Movement-specific implementation
+│           ├── charge.rs         # ChargeRequest extension trait
+│           ├── voucher.rs        # ed25519 voucher signing/verification
+│           ├── method.rs         # Server-side charge verification
+│           ├── session_method.rs # Server-side session/channel lifecycle
+│           ├── rest_client.rs    # Movement REST API client
+│           ├── network.rs        # Network configuration
+│           └── types.rs          # MovementMethodDetails
+├── client/
+│   └── movement/
+│       ├── mod.rs     # MovementProvider (charge payments)
+│       └── session.rs # MovementSessionProvider (auto-managed channels)
+├── server/
+│   ├── mpp.rs         # Mpp handler (challenge generation + verification)
+│   ├── axum.rs        # Axum MppCharge extractor
+│   ├── sse.rs         # Server-Sent Events metering
+│   └── middleware.rs  # Tower middleware
+└── store.rs           # Channel state persistence
+```
 
 ## Protocol
 
@@ -181,10 +196,8 @@ Built on the ["Payment" HTTP Authentication Scheme](https://paymentauth.org), an
 ```bash
 git clone https://github.com/andygolay/mpp-movement
 cd mpp-movement
-cargo test --features movement,server,client
+cargo test --features movement,server,client,axum
 ```
-
-321 tests, all passing.
 
 ## License
 

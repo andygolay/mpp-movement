@@ -31,14 +31,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo update -p native-tls
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-features -- -D warnings
-      - name: Run Tempo Lints
-        uses: tempoxyz/lints@main
-        with:
-          language: rust
-          path: "."
-          post-comment: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cargo clippy --features movement,server,client,axum,middleware,tower,utils -- -D warnings
 
   test:
     name: Test
@@ -51,8 +44,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo update -p native-tls
       - uses: taiki-e/install-action@cargo-hack
-      - run: cargo test --features tempo,server,client,axum,middleware,tower,utils
-      - run: cargo hack check --each-feature --no-dev-deps --skip integration
+
+      # Movement tests (primary)
+      - name: Test Movement features
+        run: cargo test --features movement,server,client,axum,middleware,tower,utils
+
+      # Movement integration tests (session lifecycle, crypto, etc.)
+      - name: Test Movement integration
+        run: cargo test --features movement,server,client --test integration_movement
+
+      # Per-feature compilation check (skip features needing external deps)
+      - name: Check each feature compiles
+        run: cargo hack check --each-feature --no-dev-deps
 
   ci-gate:
     name: CI Gate

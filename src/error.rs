@@ -264,14 +264,6 @@ pub enum MppError {
     #[error("{}", format_channel_closed(.0))]
     ChannelClosed(Option<String>),
 
-    // ==================== Method-Specific Client Errors ====================
-    /// Tempo-specific client error (transaction reverts, keychain issues, etc.).
-    ///
-    /// See [`crate::client::tempo::TempoClientError`] for variants.
-    #[cfg(all(feature = "client", feature = "tempo"))]
-    #[error("{0}")]
-    Tempo(#[from] crate::client::tempo::TempoClientError),
-
     // ==================== External Library Errors ====================
     /// IO error
     #[error("IO error: {0}")]
@@ -1017,16 +1009,4 @@ mod tests {
         assert_eq!(problem.title, "InvalidPayloadError");
     }
 
-    // --- Tempo error wrapping ---
-
-    #[cfg(all(feature = "client", feature = "tempo"))]
-    #[test]
-    fn test_tempo_error_wraps_through_from() {
-        use crate::client::tempo::TempoClientError;
-
-        let tempo_err = TempoClientError::AccessKeyNotProvisioned;
-        let mpp_err: MppError = tempo_err.into();
-        assert!(matches!(mpp_err, MppError::Tempo(_)));
-        assert_eq!(mpp_err.to_string(), "Access key not provisioned on wallet");
-    }
 }

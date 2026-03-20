@@ -20,16 +20,16 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use tower_http::cors::{Any, CorsLayer};
 use ed25519_dalek::SigningKey;
-use mpp::protocol::methods::movement::rest_client::{EntryFunctionPayload, MovementRestClient};
-use mpp::protocol::methods::movement::{self, voucher};
+use mpp::client::MovementProvider;
+use mpp::protocol::methods::movement::{rest_client::EntryFunctionPayload, voucher};
+use mpp::server::{movement as movement_builder, MovementConfig, MovementSessionOptions, Mpp};
 use mpp::format_www_authenticate;
-use sha3::{Digest, Sha3_256};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_stream::StreamExt;
+use tower_http::cors::{Any, CorsLayer};
 
 const REST_URL: &str = "https://testnet.movementnetwork.xyz/v1";
 const FAUCET_URL: &str = "https://faucet.testnet.movementnetwork.xyz";
@@ -45,8 +45,8 @@ const DEFAULT_TOKEN_METADATA: &str = "0xa";
 const SETTLE_EVERY: u32 = 5;
 
 struct AppState {
-    secret_key: String,
-    realm: String,
+    /// MPP handler for challenge generation.
+    mpp: Mpp<mpp::server::MovementChargeMethod>,
     /// Server's (payee) address.
     server_address: String,
     /// Token FA metadata address.
@@ -55,9 +55,8 @@ struct AppState {
     price_per_token: u64,
     /// Suggested deposit for a session.
     suggested_deposit: u64,
-    /// Server's signing key for on-chain settlement.
-    server_key: SigningKey,
-    rest_client: MovementRestClient,
+    /// Server's provider for on-chain settlement.
+    server_provider: MovementProvider,
     /// Tracks channel state.
     channels: std::sync::Mutex<std::collections::HashMap<String, ChannelSession>>,
 }
@@ -82,25 +81,17 @@ struct ChatQuery {
     pubkey: Option<String>,
 }
 
-fn derive_address(pubkey: &[u8; 32]) -> String {
-    let mut hasher = Sha3_256::new();
-    hasher.update(pubkey);
-    hasher.update([0x00]);
-    format!("0x{}", hex::encode(hasher.finalize()))
-}
-
 #[tokio::main]
 async fn main() {
     let _ = dotenvy::dotenv();
 
     // Generate a server wallet (the payee).
     let server_key = SigningKey::from_bytes(&rand::random());
-    let server_pubkey = server_key.verifying_key().to_bytes();
-    let server_address = derive_address(&server_pubkey);
-    let rest_client = MovementRestClient::new(REST_URL);
+    let server_provider =
+        MovementProvider::new(server_key.clone(), REST_URL).expect("failed to create provider");
+    let server_address = server_provider.address().to_string();
 
     // Token configuration via env vars (defaults to MOVE).
-    // For USDCx (6 decimals): TOKEN_METADATA=0x63f1...  PRICE_PER_TOKEN=10  SUGGESTED_DEPOSIT=10000
     let token_metadata = std::env::var("TOKEN_METADATA")
         .unwrap_or_else(|_| DEFAULT_TOKEN_METADATA.to_string());
     let price_per_token: u64 = std::env::var("PRICE_PER_TOKEN")
@@ -123,7 +114,10 @@ async fn main() {
     println!("Funding server from faucet...");
     let http = reqwest::Client::new();
     let resp = http
-        .post(&format!("{}/mint?amount=100000000&address={}", FAUCET_URL, server_address))
+        .post(&format!(
+            "{}/mint?amount=100000000&address={}",
+            FAUCET_URL, server_address
+        ))
         .send()
         .await
         .expect("faucet failed");
@@ -133,19 +127,31 @@ async fn main() {
     // Migrate to FA.
     let migrate = EntryFunctionPayload::new("0x1::coin::migrate_to_fungible_store", vec![])
         .with_type_arguments(vec!["0x1::aptos_coin::AptosCoin".to_string()]);
-    rest_client
+    server_provider
+        .rest_client()
         .build_sign_submit(&server_key, &server_address, migrate)
         .await
         .expect("migration failed");
     println!("Server funded.\n");
 
+    // Create MPP handler using the builder API.
+    let secret_key = std::env::var("MPP_SECRET_KEY")
+        .unwrap_or_else(|_| "sse-example-secret".to_string());
+    let mpp = Mpp::create_movement(
+        movement_builder(MovementConfig {
+            recipient: &server_address,
+        })
+        .rest_url(REST_URL)
+        .currency(&token_metadata)
+        .secret_key(&secret_key)
+        .decimals(8),
+    )
+    .expect("failed to create MPP handler");
+
     let state = Arc::new(AppState {
-        secret_key: std::env::var("MPP_SECRET_KEY")
-            .unwrap_or_else(|_| "sse-example-secret".to_string()),
-        realm: "movement-llm-api".to_string(),
+        mpp,
         server_address,
-        server_key,
-        rest_client,
+        server_provider,
         token_metadata,
         price_per_token,
         suggested_deposit,
@@ -183,18 +189,23 @@ async fn chat(
 ) -> impl IntoResponse {
     let prompt = query.prompt.unwrap_or_else(|| "Hello!".to_string());
 
-    // No channel_id → return 402.
+    // No channel_id -> return 402 with session challenge.
     let channel_id = match &query.channel_id {
         Some(id) => id.clone(),
         None => {
-            let challenge = movement::charge_challenge(
-                &state.secret_key,
-                &state.realm,
-                &state.suggested_deposit.to_string(),
-                &state.token_metadata,
-                &state.server_address,
-            )
-            .expect("failed to create challenge");
+            let challenge = state
+                .mpp
+                .movement_session_challenge(
+                    &state.price_per_token.to_string(),
+                    MovementSessionOptions {
+                        unit_type: Some("token"),
+                        suggested_deposit: Some(&state.suggested_deposit.to_string()),
+                        module_address: Some(MODULE_ADDRESS),
+                        min_voucher_delta: Some(&(state.price_per_token * 10).to_string()),
+                        ..Default::default()
+                    },
+                )
+                .expect("failed to create challenge");
 
             let www_auth = format_www_authenticate(&challenge).expect("failed to format");
             return (
@@ -213,12 +224,19 @@ async fn chat(
     };
 
     // Parse voucher params.
-    let cumulative: u64 = match query.cumulative_amount.as_deref().and_then(|s| s.parse().ok()) {
+    let cumulative: u64 = match query
+        .cumulative_amount
+        .as_deref()
+        .and_then(|s| s.parse().ok())
+    {
         Some(v) => v,
         None => {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "error": "missing or invalid cumulative_amount"
-            })))
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "missing or invalid cumulative_amount"
+                })),
+            )
                 .into_response();
         }
     };
@@ -226,9 +244,10 @@ async fn chat(
     let sig_hex = match &query.signature {
         Some(s) => s.clone(),
         None => {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "error": "missing signature"
-            })))
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "missing signature" })),
+            )
                 .into_response();
         }
     };
@@ -237,9 +256,12 @@ async fn chat(
     let sig_bytes: [u8; 64] = match hex::decode(sig_clean) {
         Ok(b) if b.len() == 64 => b.try_into().unwrap(),
         _ => {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "error": "signature must be 64 bytes hex"
-            })))
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "signature must be 64 bytes hex"
+                })),
+            )
                 .into_response();
         }
     };
@@ -249,9 +271,10 @@ async fn chat(
         match hex::decode(clean) {
             Ok(b) => b,
             Err(_) => {
-                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                    "error": "invalid channel_id hex"
-                })))
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "invalid channel_id hex" })),
+                )
                     .into_response();
             }
         }
@@ -274,19 +297,25 @@ async fn chat(
     });
 
     if cumulative <= session.highest_cumulative {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "error": "cumulative_amount must increase",
-            "highest": session.highest_cumulative.to_string(),
-        })))
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "cumulative_amount must increase",
+                "highest": session.highest_cumulative.to_string(),
+            })),
+        )
             .into_response();
     }
 
     let pubkey: [u8; 32] = match session.authorized_pubkey.clone().try_into() {
         Ok(pk) => pk,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "error": "pubkey must be 32 bytes; send pubkey= on first request"
-            })))
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "pubkey must be 32 bytes; send pubkey= on first request"
+                })),
+            )
                 .into_response();
         }
     };
@@ -300,9 +329,10 @@ async fn chat(
     );
 
     if !valid {
-        return (StatusCode::PAYMENT_REQUIRED, Json(serde_json::json!({
-            "error": "invalid voucher signature"
-        })))
+        return (
+            StatusCode::PAYMENT_REQUIRED,
+            Json(serde_json::json!({ "error": "invalid voucher signature" })),
+        )
             .into_response();
     }
 
@@ -321,14 +351,17 @@ async fn chat(
     drop(channels);
 
     if tokens_bought == 0 {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "error": "voucher delta too small",
-            "price_per_token": state.price_per_token.to_string(),
-        })))
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "voucher delta too small",
+                "price_per_token": state.price_per_token.to_string(),
+            })),
+        )
             .into_response();
     }
 
-    // Settle on-chain periodically.
+    // Settle on-chain periodically using the SDK.
     if should_settle && cumulative > settled_so_far {
         let state_clone = state.clone();
         let channel_id_clone = channel_id.clone();
@@ -342,20 +375,17 @@ async fn chat(
                 voucher_count,
                 cumulative,
             );
-            let payload = EntryFunctionPayload::new(
-                &format!("{}::channel::settle", MODULE_ADDRESS),
-                vec![
-                    serde_json::json!(MODULE_ADDRESS),
-                    serde_json::json!(format!("0x{}", hex::encode(&channel_id_bytes_clone))),
-                    serde_json::json!(cumulative.to_string()),
-                    serde_json::json!(format!("0x{}", hex::encode(sig_clone))),
-                    serde_json::json!(format!("0x{}", hex::encode(&pubkey_clone))),
-                ],
-            );
 
             match state_clone
-                .rest_client
-                .build_sign_submit(&state_clone.server_key, &state_clone.server_address, payload)
+                .server_provider
+                .settle_channel(
+                    MODULE_ADDRESS,
+                    MODULE_ADDRESS,
+                    &channel_id_bytes_clone,
+                    cumulative,
+                    &sig_clone,
+                    &pubkey_clone,
+                )
                 .await
             {
                 Ok(tx) => {
@@ -371,7 +401,7 @@ async fn chat(
         });
     }
 
-    // Stream tokens as SSE, tracking actual delivery.
+    // Stream tokens as SSE.
     let tokens = generate_tokens(&prompt, token_offset, tokens_bought as usize);
     let actual_count = Arc::new(AtomicUsize::new(0));
     let actual_count_stream = actual_count.clone();
@@ -389,7 +419,6 @@ async fn chat(
                 format!("data: {}\n\n", serde_json::json!({"token": token, "index": count}))
             );
         }
-        // Correct tokens_delivered to reflect actual count.
         let actually_streamed = count as usize;
         actual_count_done.store(actually_streamed, Ordering::Relaxed);
         {
@@ -414,8 +443,12 @@ async fn chat(
 
     let body = Body::from_stream(event_stream);
     let mut response = body.into_response();
-    response.headers_mut().insert(header::CONTENT_TYPE, "text/event-stream".parse().unwrap());
-    response.headers_mut().insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, "text/event-stream".parse().unwrap());
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
     response
 }
 
@@ -436,38 +469,46 @@ async fn close_channel(
                 return Json(serde_json::json!({ "error": "channel not found" }));
             }
         }
-    }; // lock dropped here
+    };
 
     if session.highest_cumulative == 0 {
         return Json(serde_json::json!({ "error": "no vouchers to settle" }));
     }
 
     let channel_id_bytes = hex::decode(
-        query.channel_id.strip_prefix("0x").unwrap_or(&query.channel_id),
-    ).unwrap_or_default();
+        query
+            .channel_id
+            .strip_prefix("0x")
+            .unwrap_or(&query.channel_id),
+    )
+    .unwrap_or_default();
 
-    // Settle only for tokens actually delivered, not the full voucher amount.
+    // Settle only for tokens actually delivered.
     let fair_amount = (session.tokens_delivered as u64) * state.price_per_token;
     let settle_amount = fair_amount.min(session.highest_cumulative);
 
     println!(
         "  [close] channel {}... tokens_delivered={}, fair_amount={}, voucher_cumulative={}",
-        &query.channel_id[..16], session.tokens_delivered, fair_amount, session.highest_cumulative
+        &query.channel_id[..16],
+        session.tokens_delivered,
+        fair_amount,
+        session.highest_cumulative
     );
 
-    let payload = EntryFunctionPayload::new(
-        &format!("{}::channel::close", MODULE_ADDRESS),
-        vec![
-            serde_json::json!(MODULE_ADDRESS),
-            serde_json::json!(format!("0x{}", hex::encode(&channel_id_bytes))),
-            serde_json::json!(settle_amount.to_string()),
-            serde_json::json!(format!("0x{}", hex::encode(&session.highest_signature))),
-            serde_json::json!(format!("0x{}", hex::encode(&session.authorized_pubkey))),
-        ],
-    );
-
+    // Close the channel using the SDK.
     let deposit = session.highest_cumulative;
-    match state.rest_client.build_sign_submit(&state.server_key, &state.server_address, payload).await {
+    match state
+        .server_provider
+        .close_channel(
+            MODULE_ADDRESS,
+            MODULE_ADDRESS,
+            &channel_id_bytes,
+            settle_amount,
+            &session.highest_signature,
+            &session.authorized_pubkey,
+        )
+        .await
+    {
         Ok(tx) => {
             println!("  [close] tx: {tx}");
             Json(serde_json::json!({

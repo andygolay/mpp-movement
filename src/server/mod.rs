@@ -3,26 +3,24 @@
 //! # Simple API
 //!
 //! ```ignore
-//! use mpp::server::{Mpp, tempo, TempoConfig};
+//! use mpp::server::{Mpp, movement, MovementConfig};
 //!
-//! let mpp = Mpp::create(tempo(TempoConfig {
-//!     recipient: "0xabc...123",
+//! let mpp = Mpp::create_movement(movement(MovementConfig {
+//!     recipient: "0x3e9e...",
 //! }))?;
 //!
-//! // Charge $0.10 — everything else has smart defaults
-//! let challenge = mpp.charge("0.10")?;
+//! let challenge = mpp.movement_charge("0.10")?;
 //! ```
 //!
 //! # Advanced API
 //!
 //! ```ignore
-//! use mpp::server::{Mpp, tempo_provider, TempoChargeMethod};
+//! use mpp::server::{Mpp, MovementChargeMethod};
 //!
-//! let provider = tempo_provider("https://rpc.moderato.tempo.xyz")?;
-//! let method = TempoChargeMethod::new(provider);
+//! let method = MovementChargeMethod::new("https://testnet.movementnetwork.xyz/v1");
 //! let payment = Mpp::new(method, "api.example.com", "my-server-secret");
 //!
-//! let challenge = payment.charge_challenge("1000000", "0x...", "0x...")?;
+//! let challenge = payment.movement_charge_challenge("100000", "0xa", "0x...")?;
 //! let receipt = payment.verify(&credential, &request).await?;
 //! ```
 
@@ -40,73 +38,81 @@ pub use crate::protocol::traits::{ChargeMethod, ErrorCode, SessionMethod, Verifi
 pub use amount::{parse_dollar_amount, AmountError};
 pub use mpp::{Mpp, SessionVerifyResult};
 
-#[cfg(feature = "tempo")]
-pub use crate::protocol::methods::tempo::ChargeMethod as TempoChargeMethod;
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+pub use crate::protocol::methods::movement::ChargeMethod as MovementChargeMethod;
 
-#[cfg(feature = "tempo")]
-pub use crate::protocol::methods::tempo::{
-    TempoChargeExt, TempoMethodDetails, CHAIN_ID, METHOD_NAME,
-};
+/// Options for [`Mpp::charge_with_options()`].
+#[derive(Debug, Default)]
+pub struct ChargeOptions<'a> {
+    /// Human-readable description.
+    pub description: Option<&'a str>,
+    /// Merchant reference ID.
+    pub external_id: Option<&'a str>,
+    /// Custom expiration (ISO 8601). Default: now + 5 minutes.
+    pub expires: Option<&'a str>,
+    /// Enable fee sponsorship.
+    pub fee_payer: bool,
+}
 
-#[cfg(feature = "tempo")]
-pub use crate::protocol::methods::tempo::session_method::{
-    InMemoryChannelStore as SessionChannelStore, SessionMethod as TempoSessionMethod,
-    SessionMethodConfig,
-};
+// ==================== Movement Simple API ====================
 
-// ==================== Simple API ====================
-
-/// Configuration for the Tempo payment method.
+/// Configuration for the Movement payment method.
 ///
 /// Only `recipient` is required. Everything else has smart defaults.
-#[cfg(feature = "tempo")]
-pub struct TempoConfig<'a> {
-    /// Recipient address for payments.
+///
+/// # Example
+///
+/// ```ignore
+/// use mpp::server::{Mpp, movement, MovementConfig};
+///
+/// let mpp = Mpp::create_movement(movement(MovementConfig {
+///     recipient: "0x3e9e...",
+/// }))?;
+///
+/// let challenge = mpp.movement_charge("0.10")?;
+/// ```
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+pub struct MovementConfig<'a> {
+    /// Recipient address for payments (32-byte hex Move address).
     pub recipient: &'a str,
 }
 
-/// Builder returned by [`tempo()`] for configuring a Tempo payment method.
-///
-/// Has smart defaults for everything; use builder methods to override.
-#[cfg(feature = "tempo")]
-pub struct TempoBuilder {
+/// Builder returned by [`movement()`] for configuring a Movement payment method.
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+pub struct MovementBuilder {
     pub(crate) currency: String,
-    pub(crate) currency_explicit: bool,
     pub(crate) recipient: String,
-    pub(crate) rpc_url: String,
+    pub(crate) rest_url: String,
     pub(crate) realm: String,
     pub(crate) secret_key: Option<String>,
     pub(crate) decimals: u32,
-    pub(crate) fee_payer: bool,
-    pub(crate) chain_id: Option<u64>,
-    pub(crate) fee_payer_signer: Option<alloy::signers::local::PrivateKeySigner>,
+    pub(crate) network: Option<crate::protocol::methods::movement::MovementNetwork>,
 }
 
-#[cfg(feature = "tempo")]
-impl TempoBuilder {
-    /// Override the RPC URL (default: `https://rpc.tempo.xyz`).
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+impl MovementBuilder {
+    /// Override the REST API URL.
     ///
-    /// Also auto-detects the chain ID from the URL if not explicitly set:
-    /// - URLs containing "moderato" → chain ID 42431 (Tempo Moderato testnet)
-    /// - Otherwise → chain ID 4217 (Tempo mainnet)
-    pub fn rpc_url(mut self, url: &str) -> Self {
-        self.rpc_url = url.to_string();
-        if self.chain_id.is_none() {
-            self.chain_id = Some(chain_id_from_rpc_url(url));
+    /// Also auto-detects the network from the URL if not explicitly set:
+    /// - URLs containing "testnet" -> `MovementNetwork::Testnet`
+    /// - Otherwise -> `MovementNetwork::Mainnet`
+    pub fn rest_url(mut self, url: &str) -> Self {
+        self.rest_url = url.to_string();
+        if self.network.is_none() {
+            self.network = Some(network_from_rest_url(url));
         }
         self
     }
 
-    /// Explicitly set the chain ID for challenges.
-    pub fn chain_id(mut self, id: u64) -> Self {
-        self.chain_id = Some(id);
+    /// Explicitly set the network.
+    pub fn network(mut self, network: crate::protocol::methods::movement::MovementNetwork) -> Self {
+        self.network = Some(network);
         self
     }
 
-    /// Override the token currency (default: USDC on mainnet, pathUSD on testnet).
+    /// Override the token currency (default: MOVE token `0xa`).
     pub fn currency(mut self, addr: &str) -> Self {
         self.currency = addr.to_string();
-        self.currency_explicit = true;
         self
     }
 
@@ -122,159 +128,100 @@ impl TempoBuilder {
         self
     }
 
-    /// Override the token decimals (default: `6`).
+    /// Override the token decimals (default: `8` for MOVE).
     pub fn decimals(mut self, d: u32) -> Self {
         self.decimals = d;
         self
     }
-
-    /// Enable fee sponsorship for all challenges (default: `false`).
-    ///
-    /// When enabled, all charge and session challenges will include
-    /// `feePayer: true` in their `methodDetails`. You should also call
-    /// [`fee_payer_signer`](Self::fee_payer_signer) to provide the signer
-    /// that will sponsor transaction fees.
-    pub fn fee_payer(mut self, enabled: bool) -> Self {
-        self.fee_payer = enabled;
-        self
-    }
-
-    /// Set the signer used for fee sponsorship.
-    ///
-    /// When clients send transactions with `feePayer: true`, the server
-    /// uses this signer to co-sign and sponsor the transaction gas fees.
-    /// The signer's account must have sufficient balance for gas.
-    pub fn fee_payer_signer(mut self, signer: alloy::signers::local::PrivateKeySigner) -> Self {
-        self.fee_payer_signer = Some(signer);
-        self
-    }
 }
 
-/// Options for [`Mpp::session_challenge_with_details()`].
-#[derive(Debug, Default)]
-pub struct SessionChallengeOptions<'a> {
-    /// Unit type label (e.g., "token", "byte", "request"). Optional.
-    pub unit_type: Option<&'a str>,
-    /// Suggested deposit amount in base units.
-    pub suggested_deposit: Option<&'a str>,
-    /// Enable fee sponsorship.
-    pub fee_payer: bool,
-    /// Human-readable description.
-    pub description: Option<&'a str>,
-    /// Custom expiration (ISO 8601). Default: none.
-    pub expires: Option<&'a str>,
-}
-
-/// Options for [`Mpp::charge_with_options()`].
-#[derive(Debug, Default)]
-pub struct ChargeOptions<'a> {
-    /// Human-readable description.
-    pub description: Option<&'a str>,
-    /// Merchant reference ID.
-    pub external_id: Option<&'a str>,
-    /// Custom expiration (ISO 8601). Default: now + 5 minutes.
-    pub expires: Option<&'a str>,
-    /// Enable fee sponsorship.
-    pub fee_payer: bool,
-}
-
-/// Create a Tempo payment method configuration with smart defaults.
+/// Create a Movement payment method configuration with smart defaults.
 ///
-/// Only `currency` and `recipient` are required. Returns a [`TempoBuilder`]
-/// that can be passed to [`Mpp::create()`].
+/// Returns a [`MovementBuilder`] that can be passed to [`Mpp::create_movement()`].
 ///
 /// # Defaults
 ///
-/// - **rpc_url**: `https://rpc.tempo.xyz`
-/// - **realm**: auto-detected from `MPP_REALM`, `FLY_APP_NAME`, `HEROKU_APP_NAME`,
-///   `HOST`, `HOSTNAME`, `RAILWAY_PUBLIC_DOMAIN`, `RENDER_EXTERNAL_HOSTNAME`,
-///   `VERCEL_URL`, `WEBSITE_HOSTNAME` — falling back to `"MPP Payment"`
-/// - **secret_key**: reads `MPP_SECRET_KEY` env var; required if not explicitly set
-/// - **currency**: pathUSD (`0x20c0000000000000000000000000000000000000`)
-/// - **decimals**: `6` (for pathUSD / standard stablecoins)
-/// - **expires**: `now + 5 minutes`
+/// - **rest_url**: `https://mainnet.movementnetwork.xyz/v1`
+/// - **currency**: MOVE token (`0xa`)
+/// - **decimals**: `8` (for MOVE token)
+/// - **realm**: auto-detected from environment variables
+/// - **secret_key**: reads `MPP_SECRET_KEY` env var
 ///
 /// # Example
 ///
 /// ```ignore
-/// use mpp::server::{Mpp, tempo, TempoConfig};
+/// use mpp::server::{Mpp, movement, MovementConfig};
 ///
-/// // Minimal — currency defaults to pathUSD
-/// let mpp = Mpp::create(tempo(TempoConfig {
-///     recipient: "0xabc...123",
+/// let mpp = Mpp::create_movement(movement(MovementConfig {
+///     recipient: "0x3e9e...",
 /// }))?;
-///
-/// // With overrides
-/// let mpp = Mpp::create(
-///     tempo(TempoConfig {
-///         recipient: "0xabc...123",
-///     })
-///     .currency("0xcustom_token_address")
-///     .rpc_url("https://rpc.moderato.tempo.xyz")
-///     .realm("my-api.com")
-///     .secret_key("my-secret")
-///     .decimals(18),
-/// )?;
 /// ```
-#[cfg(feature = "tempo")]
-pub fn tempo(config: TempoConfig<'_>) -> TempoBuilder {
-    TempoBuilder {
-        currency: crate::protocol::methods::tempo::DEFAULT_CURRENCY_MAINNET.to_string(),
-        currency_explicit: false,
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+pub fn movement(config: MovementConfig<'_>) -> MovementBuilder {
+    MovementBuilder {
+        currency: crate::protocol::methods::movement::MOVE_TOKEN_METADATA.to_string(),
         recipient: config.recipient.to_string(),
-        rpc_url: crate::protocol::methods::tempo::DEFAULT_RPC_URL.to_string(),
-        realm: mpp::detect_realm(),
+        rest_url: crate::protocol::methods::movement::DEFAULT_REST_URL_MAINNET.to_string(),
+        realm: detect_realm(),
         secret_key: None,
-        decimals: 6,
-        fee_payer: false,
-        chain_id: None,
-        fee_payer_signer: None,
+        decimals: 8,
+        network: None,
     }
 }
 
-/// Derive a chain ID from an RPC URL.
+/// Options for [`Mpp::movement_session_challenge()`].
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+#[derive(Debug, Default)]
+pub struct MovementSessionOptions<'a> {
+    /// Unit type label (e.g., "token", "byte", "request").
+    pub unit_type: Option<&'a str>,
+    /// Suggested deposit amount in base units.
+    pub suggested_deposit: Option<&'a str>,
+    /// Module address (defaults to `DEFAULT_MODULE_ADDRESS`).
+    pub module_address: Option<&'a str>,
+    /// Registry address (defaults to module address).
+    pub registry_address: Option<&'a str>,
+    /// Minimum voucher delta in base units.
+    pub min_voucher_delta: Option<&'a str>,
+    /// Human-readable description.
+    pub description: Option<&'a str>,
+    /// Custom expiration (ISO 8601). Default: now + 5 minutes.
+    pub expires: Option<&'a str>,
+}
+
+/// Detect the server realm from environment variables.
 ///
-/// Returns `MODERATO_CHAIN_ID` (42431) for URLs containing "moderato",
-/// otherwise returns `CHAIN_ID` (4217).
-#[cfg(feature = "tempo")]
-fn chain_id_from_rpc_url(url: &str) -> u64 {
-    if url.contains("moderato") {
-        crate::protocol::methods::tempo::MODERATO_CHAIN_ID
+/// Checks platform-specific env vars in order, falling back to `"MPP Payment"`.
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+fn detect_realm() -> String {
+    const REALM_ENV_VARS: &[&str] = &[
+        "MPP_REALM",
+        "FLY_APP_NAME",
+        "HEROKU_APP_NAME",
+        "HOST",
+        "HOSTNAME",
+        "RAILWAY_PUBLIC_DOMAIN",
+        "RENDER_EXTERNAL_HOSTNAME",
+        "VERCEL_URL",
+        "WEBSITE_HOSTNAME",
+    ];
+
+    for name in REALM_ENV_VARS {
+        if let Ok(value) = std::env::var(name) {
+            if !value.is_empty() {
+                return value;
+            }
+        }
+    }
+    "MPP Payment".to_string()
+}
+
+/// Derive a Movement network from a REST API URL.
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+fn network_from_rest_url(url: &str) -> crate::protocol::methods::movement::MovementNetwork {
+    if url.contains("testnet") {
+        crate::protocol::methods::movement::MovementNetwork::Testnet
     } else {
-        crate::protocol::methods::tempo::CHAIN_ID
+        crate::protocol::methods::movement::MovementNetwork::Mainnet
     }
 }
-
-// ==================== Advanced API ====================
-
-/// Create a Tempo-compatible provider for server-side verification.
-///
-/// This provider uses `TempoNetwork` which properly handles Tempo's
-/// custom transaction type (0x76) and receipt format.
-#[cfg(feature = "tempo")]
-pub fn tempo_provider(rpc_url: &str) -> crate::error::Result<TempoProvider> {
-    use alloy::providers::ProviderBuilder;
-    use tempo_alloy::TempoNetwork;
-
-    let url = rpc_url
-        .parse()
-        .map_err(|e| crate::error::MppError::InvalidConfig(format!("invalid RPC URL: {}", e)))?;
-    Ok(ProviderBuilder::new_with_network::<TempoNetwork>().connect_http(url))
-}
-
-/// Type alias for the Tempo provider returned by [`tempo_provider`].
-#[cfg(feature = "tempo")]
-pub type TempoProvider = alloy::providers::fillers::FillProvider<
-    alloy::providers::fillers::JoinFill<
-        alloy::providers::Identity,
-        alloy::providers::fillers::JoinFill<
-            alloy::providers::fillers::NonceFiller,
-            alloy::providers::fillers::JoinFill<
-                alloy::providers::fillers::GasFiller,
-                alloy::providers::fillers::ChainIdFiller,
-            >,
-        >,
-    >,
-    alloy::providers::RootProvider<tempo_alloy::TempoNetwork>,
-    tempo_alloy::TempoNetwork,
->;

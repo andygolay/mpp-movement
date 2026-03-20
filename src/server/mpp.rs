@@ -6,59 +6,24 @@
 //! # Example (simple API)
 //!
 //! ```ignore
-//! use mpp::server::{Mpp, tempo};
+//! use mpp::server::{Mpp, movement, MovementConfig};
 //!
-//! let mpp = Mpp::create(tempo(mpp::server::TempoConfig {
-//!     recipient: "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
+//! let mpp = Mpp::create_movement(movement(MovementConfig {
+//!     recipient: "0x3e9e...",
 //! }))?;
 //!
-//! let challenge = mpp.charge("0.10")?;
+//! let challenge = mpp.movement_charge("0.10")?;
 //! ```
 
-#[cfg(feature = "tempo")]
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
 use crate::error::Result;
-#[cfg(feature = "tempo")]
-use crate::protocol::core::PaymentChallenge;
 use crate::protocol::core::{PaymentCredential, Receipt};
 use crate::protocol::intents::ChargeRequest;
 use crate::protocol::traits::{ChargeMethod, VerificationError};
 
-#[cfg(feature = "tempo")]
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
 const SECRET_KEY_ENV_VAR: &str = "MPP_SECRET_KEY";
 const DEFAULT_DECIMALS: u32 = 6;
-
-/// Environment variables checked (in order) to auto-detect the server realm.
-#[cfg(feature = "tempo")]
-const REALM_ENV_VARS: &[&str] = &[
-    "MPP_REALM",
-    "FLY_APP_NAME",
-    "HEROKU_APP_NAME",
-    "HOST",
-    "HOSTNAME",
-    "RAILWAY_PUBLIC_DOMAIN",
-    "RENDER_EXTERNAL_HOSTNAME",
-    "VERCEL_URL",
-    "WEBSITE_HOSTNAME",
-];
-
-#[cfg(feature = "tempo")]
-const DEFAULT_REALM: &str = "MPP Payment";
-
-/// Detect the server realm from environment variables.
-///
-/// Checks platform-specific env vars in order (see [`REALM_ENV_VARS`]),
-/// falling back to `"MPP Payment"`.
-#[cfg(feature = "tempo")]
-pub(crate) fn detect_realm() -> String {
-    for name in REALM_ENV_VARS {
-        if let Ok(value) = std::env::var(name) {
-            if !value.is_empty() {
-                return value;
-            }
-        }
-    }
-    DEFAULT_REALM.to_string()
-}
 
 /// Result of session verification, including optional management response.
 #[derive(Debug)]
@@ -79,26 +44,25 @@ pub struct SessionVerifyResult {
 /// # Simple API
 ///
 /// ```ignore
-/// use mpp::server::{Mpp, tempo, TempoConfig};
+/// use mpp::server::{Mpp, movement, MovementConfig};
 ///
-/// let mpp = Mpp::create(tempo(TempoConfig {
-///     recipient: "0xabc...123",
+/// let mpp = Mpp::create_movement(movement(MovementConfig {
+///     recipient: "0x3e9e...",
 /// }))?;
 ///
 /// // Charge $0.10 — currency, recipient, realm, secret, expires all handled
-/// let challenge = mpp.charge("0.10")?;
+/// let challenge = mpp.movement_charge("0.10")?;
 /// ```
 ///
 /// # Advanced API
 ///
 /// ```ignore
-/// use mpp::server::{Mpp, tempo_provider, TempoChargeMethod};
+/// use mpp::server::{Mpp, MovementChargeMethod};
 ///
-/// let provider = tempo_provider("https://rpc.moderato.tempo.xyz")?;
-/// let method = TempoChargeMethod::new(provider);
+/// let method = MovementChargeMethod::new("https://fullnode.testnet.movementnetwork.xyz/v1");
 /// let payment = Mpp::new(method, "api.example.com", "my-server-secret");
 ///
-/// let challenge = payment.charge_challenge("1000000", "0x...", "0x...")?;
+/// let challenge = payment.movement_charge_challenge("1000000", "0x...", "0x...")?;
 /// ```
 #[derive(Clone)]
 pub struct Mpp<M, S = ()> {
@@ -119,7 +83,7 @@ where
 {
     /// Create a new payment handler (advanced API).
     ///
-    /// For a simpler API, use [`Mpp::create()`] with [`tempo()`](super::tempo).
+    /// For a simpler API, use [`Mpp::create_movement()`] with [`movement()`](super::movement).
     pub fn new(method: M, realm: impl Into<String>, secret_key: impl Into<String>) -> Mpp<M, ()> {
         Mpp {
             method,
@@ -251,119 +215,6 @@ where
         Ok(())
     }
 
-    #[cfg(feature = "tempo")]
-    fn require_bound_config(&self) -> Result<(&str, &str)> {
-        let currency = self.currency.as_deref().ok_or_else(|| {
-            crate::error::MppError::InvalidConfig(
-                "currency not configured — use Mpp::create() or set currency".into(),
-            )
-        })?;
-        let recipient = self.recipient.as_deref().ok_or_else(|| {
-            crate::error::MppError::InvalidConfig(
-                "recipient not configured — use Mpp::create() or set recipient".into(),
-            )
-        })?;
-        Ok((currency, recipient))
-    }
-
-    /// Generate a charge challenge for a dollar amount.
-    ///
-    /// Requires currency and recipient to be bound (via [`Mpp::create()`]).
-    /// The amount is automatically converted from dollars to base units
-    /// using the configured decimals (default: 6).
-    ///
-    /// # Arguments
-    ///
-    /// * `amount` - Amount in dollars (e.g., `"0.10"` for 10 cents)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let challenge = mpp.charge("0.10")?;
-    /// ```
-    #[cfg(feature = "tempo")]
-    pub fn charge(&self, amount: &str) -> Result<PaymentChallenge> {
-        self.charge_with_options(amount, super::ChargeOptions::default())
-    }
-
-    /// Generate a charge challenge with a dollar amount and additional options.
-    ///
-    /// Requires currency and recipient to be bound (via [`Mpp::create()`]).
-    #[cfg(feature = "tempo")]
-    pub fn charge_with_options(
-        &self,
-        amount: &str,
-        options: super::ChargeOptions<'_>,
-    ) -> Result<PaymentChallenge> {
-        let (currency, recipient) = self.require_bound_config()?;
-        let base_units = super::parse_dollar_amount(amount, self.decimals)?;
-        let mut request = ChargeRequest {
-            amount: base_units,
-            currency: currency.to_string(),
-            recipient: Some(recipient.to_string()),
-            description: options.description.map(|s| s.to_string()),
-            external_id: options.external_id.map(|s| s.to_string()),
-            ..Default::default()
-        };
-        {
-            let mut details = serde_json::Map::new();
-            if options.fee_payer || self.fee_payer {
-                details.insert("feePayer".into(), serde_json::json!(true));
-            }
-            if let Some(chain_id) = self.chain_id {
-                details.insert("chainId".into(), serde_json::json!(chain_id));
-            }
-            if !details.is_empty() {
-                request.method_details = Some(serde_json::Value::Object(details));
-            }
-        }
-        crate::protocol::methods::tempo::charge_challenge_with_options(
-            &self.secret_key,
-            &self.realm,
-            &request,
-            options.expires,
-            options.description,
-        )
-    }
-
-    /// Generate a charge challenge with explicit parameters (base units).
-    ///
-    /// Use this when you want to specify amount, currency, and recipient
-    /// per-call instead of using bound defaults. Amount is in base units
-    /// (e.g., `"1000000"` for 1 pathUSD).
-    #[cfg(feature = "tempo")]
-    pub fn charge_challenge(
-        &self,
-        amount: &str,
-        currency: &str,
-        recipient: &str,
-    ) -> Result<PaymentChallenge> {
-        crate::protocol::methods::tempo::charge_challenge(
-            &self.secret_key,
-            &self.realm,
-            amount,
-            currency,
-            recipient,
-        )
-    }
-
-    /// Generate a charge challenge with full options (base units).
-    #[cfg(feature = "tempo")]
-    pub fn charge_challenge_with_options(
-        &self,
-        request: &ChargeRequest,
-        expires: Option<&str>,
-        description: Option<&str>,
-    ) -> Result<PaymentChallenge> {
-        crate::protocol::methods::tempo::charge_challenge_with_options(
-            &self.secret_key,
-            &self.realm,
-            request,
-            expires,
-            description,
-        )
-    }
-
     /// Verify a payment credential (simple API).
     ///
     /// Decodes the charge request from the echoed challenge automatically.
@@ -443,126 +294,6 @@ where
     M: ChargeMethod,
     S: crate::protocol::traits::SessionMethod,
 {
-    /// Generate a session challenge.
-    #[cfg(feature = "tempo")]
-    pub fn session_challenge(
-        &self,
-        amount: &str,
-        currency: &str,
-        recipient: &str,
-    ) -> crate::error::Result<PaymentChallenge> {
-        use crate::protocol::intents::SessionRequest;
-
-        let request = SessionRequest {
-            amount: amount.to_string(),
-            currency: currency.to_string(),
-            recipient: Some(recipient.to_string()),
-            ..Default::default()
-        };
-        let encoded = crate::protocol::core::Base64UrlJson::from_typed(&request)?;
-
-        let id = crate::protocol::methods::tempo::generate_challenge_id(
-            &self.secret_key,
-            &self.realm,
-            "tempo",
-            "session",
-            encoded.raw(),
-            None,
-            None,
-            None,
-        );
-
-        Ok(PaymentChallenge {
-            id,
-            realm: self.realm.clone(),
-            method: "tempo".into(),
-            intent: "session".into(),
-            request: encoded,
-            expires: None,
-            description: None,
-            digest: None,
-            opaque: None,
-        })
-    }
-
-    /// Generate a session challenge with method details populated from the session method.
-    ///
-    /// When a session method is configured (e.g., Tempo's `SessionMethod`), this
-    /// automatically populates `methodDetails` with fields like `escrowContract`,
-    /// `chainId`, and `minVoucherDelta`. Additional options like `suggestedDeposit`,
-    /// `feePayer`, `description`, and `expires` can be set via [`SessionChallengeOptions`](super::SessionChallengeOptions).
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let challenge = mpp.session_challenge_with_details(
-    ///     "1000",
-    ///     "0x20c0...",
-    ///     "0x742d...",
-    ///     SessionChallengeOptions {
-    ///         unit_type: Some("second"),
-    ///         suggested_deposit: Some("60000"),
-    ///         fee_payer: true,
-    ///         ..Default::default()
-    ///     },
-    /// )?;
-    /// ```
-    #[cfg(feature = "tempo")]
-    pub fn session_challenge_with_details(
-        &self,
-        amount: &str,
-        currency: &str,
-        recipient: &str,
-        options: super::SessionChallengeOptions<'_>,
-    ) -> crate::error::Result<PaymentChallenge> {
-        use crate::protocol::intents::SessionRequest;
-
-        let session = self.session_method.as_ref();
-
-        let mut method_details = session.and_then(|s| s.challenge_method_details());
-
-        if options.fee_payer || self.fee_payer {
-            let details = method_details.get_or_insert_with(|| serde_json::json!({}));
-            if let Some(obj) = details.as_object_mut() {
-                obj.insert("feePayer".to_string(), serde_json::json!(true));
-            }
-        }
-
-        let request = SessionRequest {
-            amount: amount.to_string(),
-            unit_type: options.unit_type.map(|s| s.to_string()),
-            currency: currency.to_string(),
-            recipient: Some(recipient.to_string()),
-            suggested_deposit: options.suggested_deposit.map(|s| s.to_string()),
-            method_details,
-            ..Default::default()
-        };
-        let encoded = crate::protocol::core::Base64UrlJson::from_typed(&request)?;
-
-        let id = crate::protocol::methods::tempo::generate_challenge_id(
-            &self.secret_key,
-            &self.realm,
-            "tempo",
-            "session",
-            encoded.raw(),
-            options.expires,
-            None,
-            None,
-        );
-
-        Ok(PaymentChallenge {
-            id,
-            realm: self.realm.clone(),
-            method: "tempo".into(),
-            intent: "session".into(),
-            request: encoded,
-            expires: options.expires.map(|s| s.to_string()),
-            description: options.description.map(|s| s.to_string()),
-            digest: None,
-            opaque: None,
-        })
-    }
-
     /// Verify a session credential.
     pub async fn verify_session(
         &self,
@@ -595,28 +326,27 @@ where
     }
 }
 
-/// Tempo-specific `create` constructor for [`Mpp`].
-#[cfg(feature = "tempo")]
-impl Mpp<super::TempoChargeMethod<super::TempoProvider>> {
-    /// Create a payment handler from a [`TempoBuilder`](super::TempoBuilder).
+/// Movement-specific `create_movement` constructor for [`Mpp`].
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+impl Mpp<super::MovementChargeMethod> {
+    /// Create a payment handler from a [`MovementBuilder`](super::MovementBuilder).
     ///
-    /// This is the simplest way to set up server-side payments.
+    /// This is the simplest way to set up server-side Movement payments.
     /// Currency and recipient are bound at creation time, so
-    /// [`charge()`](Mpp::charge) only needs the dollar amount.
+    /// [`movement_charge()`](Mpp::movement_charge) only needs the dollar amount.
     ///
     /// # Example
     ///
     /// ```ignore
-    /// use mpp::server::{Mpp, tempo, TempoConfig};
+    /// use mpp::server::{Mpp, movement, MovementConfig};
     ///
-    /// let mpp = Mpp::create(tempo(TempoConfig {
-    ///     currency: "0x20c0000000000000000000000000000000000000",
-    ///     recipient: "0xabc...123",
+    /// let mpp = Mpp::create_movement(movement(MovementConfig {
+    ///     recipient: "0x3e9e...",
     /// }))?;
     ///
-    /// let challenge = mpp.charge("1.00")?;
+    /// let challenge = mpp.movement_charge("0.10")?;
     /// ```
-    pub fn create(builder: super::TempoBuilder) -> Result<Self> {
+    pub fn create_movement(builder: super::MovementBuilder) -> Result<Self> {
         let secret_key = builder
             .secret_key
             .or_else(|| std::env::var(SECRET_KEY_ENV_VAR).ok())
@@ -634,35 +364,170 @@ impl Mpp<super::TempoChargeMethod<super::TempoProvider>> {
                 ))
             })?;
 
-        let provider = super::tempo_provider(&builder.rpc_url)?;
-        let mut method = crate::protocol::methods::tempo::ChargeMethod::new(provider);
-        if let Some(signer) = builder.fee_payer_signer {
-            method = method.with_fee_payer(signer);
-        }
-
-        // Resolve currency from chain_id when not explicitly set
-        let currency = if builder.currency_explicit {
-            builder.currency
-        } else {
-            use crate::protocol::methods::tempo::network::TempoNetwork;
-            builder
-                .chain_id
-                .and_then(TempoNetwork::from_chain_id)
-                .map(|n| n.default_currency().to_string())
-                .unwrap_or_else(|| crate::protocol::methods::tempo::PATH_USD.to_string())
-        };
+        let method = crate::protocol::methods::movement::ChargeMethod::new(&builder.rest_url);
 
         Ok(Self {
             method,
             session_method: None,
             realm: builder.realm,
             secret_key,
-            currency: Some(currency),
+            currency: Some(builder.currency),
             recipient: Some(builder.recipient),
             decimals: builder.decimals,
-            fee_payer: builder.fee_payer,
-            chain_id: builder.chain_id,
+            fee_payer: false,
+            chain_id: None,
         })
+    }
+}
+
+/// Movement charge and session challenge methods.
+///
+/// These are available on any `Mpp<MovementChargeMethod, S>`, regardless of
+/// whether a session method is attached.
+#[cfg(all(feature = "movement", feature = "server", feature = "client"))]
+impl<S> Mpp<super::MovementChargeMethod, S> {
+    /// Generate a charge challenge for a dollar amount (Movement).
+    ///
+    /// Requires currency and recipient to be bound (via [`Mpp::create_movement()`]).
+    /// The amount is automatically converted from dollars to base units.
+    pub fn movement_charge(
+        &self,
+        amount: &str,
+    ) -> Result<crate::protocol::core::PaymentChallenge> {
+        self.movement_charge_with_options(amount, super::ChargeOptions::default())
+    }
+
+    /// Generate a charge challenge with options (Movement).
+    pub fn movement_charge_with_options(
+        &self,
+        amount: &str,
+        options: super::ChargeOptions<'_>,
+    ) -> Result<crate::protocol::core::PaymentChallenge> {
+        let (currency, recipient) = self.require_movement_config()?;
+        let base_units = super::parse_dollar_amount(amount, self.decimals)?;
+        let request = ChargeRequest {
+            amount: base_units,
+            currency: currency.to_string(),
+            recipient: Some(recipient.to_string()),
+            description: options.description.map(|s| s.to_string()),
+            external_id: options.external_id.map(|s| s.to_string()),
+            ..Default::default()
+        };
+        crate::protocol::methods::movement::charge_challenge_with_options(
+            &self.secret_key,
+            &self.realm,
+            &request,
+            options.expires,
+            options.description,
+        )
+    }
+
+    /// Generate a Movement charge challenge with explicit parameters (base units).
+    pub fn movement_charge_challenge(
+        &self,
+        amount: &str,
+        currency: &str,
+        recipient: &str,
+    ) -> Result<crate::protocol::core::PaymentChallenge> {
+        crate::protocol::methods::movement::charge_challenge(
+            &self.secret_key,
+            &self.realm,
+            amount,
+            currency,
+            recipient,
+        )
+    }
+
+    /// Generate a session challenge for Movement (base units).
+    ///
+    /// The challenge includes session-specific method details like
+    /// `moduleAddress`, `tokenMetadata`, and `suggestedDeposit`.
+    pub fn movement_session_challenge(
+        &self,
+        amount_per_unit: &str,
+        options: super::MovementSessionOptions<'_>,
+    ) -> Result<crate::protocol::core::PaymentChallenge> {
+        let (currency, recipient) = self.require_movement_config()?;
+
+        let module_address = options
+            .module_address
+            .unwrap_or(crate::protocol::methods::movement::DEFAULT_MODULE_ADDRESS);
+
+        let mut method_details = serde_json::json!({
+            "moduleAddress": module_address,
+            "registryAddress": options.registry_address.unwrap_or(module_address),
+            "tokenMetadata": currency,
+        });
+        if let Some(delta) = options.min_voucher_delta {
+            method_details["minVoucherDelta"] = serde_json::json!(delta);
+        }
+
+        let request = crate::protocol::intents::SessionRequest {
+            amount: amount_per_unit.to_string(),
+            unit_type: options.unit_type.map(|s| s.to_string()),
+            currency: currency.to_string(),
+            recipient: Some(recipient.to_string()),
+            suggested_deposit: options.suggested_deposit.map(|s| s.to_string()),
+            method_details: Some(method_details),
+            ..Default::default()
+        };
+        let encoded = crate::protocol::core::Base64UrlJson::from_typed(&request)?;
+
+        let expires_str;
+        let expires = match options.expires {
+            Some(e) => Some(e),
+            None => {
+                let expiry = time::OffsetDateTime::now_utc()
+                    + time::Duration::minutes(
+                        crate::protocol::methods::movement::DEFAULT_EXPIRES_MINUTES as i64,
+                    );
+                expires_str = expiry
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .map_err(|e| {
+                        crate::error::MppError::InvalidConfig(format!(
+                            "failed to format expires: {e}"
+                        ))
+                    })?;
+                Some(expires_str.as_str())
+            }
+        };
+
+        let id = crate::protocol::core::compute_challenge_id(
+            &self.secret_key,
+            &self.realm,
+            crate::protocol::methods::movement::METHOD_NAME,
+            crate::protocol::methods::movement::INTENT_SESSION,
+            encoded.raw(),
+            expires,
+            None,
+            None,
+        );
+
+        Ok(crate::protocol::core::PaymentChallenge {
+            id,
+            realm: self.realm.clone(),
+            method: crate::protocol::methods::movement::METHOD_NAME.into(),
+            intent: crate::protocol::methods::movement::INTENT_SESSION.into(),
+            request: encoded,
+            expires: expires.map(|s| s.to_string()),
+            description: options.description.map(|s| s.to_string()),
+            digest: None,
+            opaque: None,
+        })
+    }
+
+    fn require_movement_config(&self) -> Result<(&str, &str)> {
+        let currency = self.currency.as_deref().ok_or_else(|| {
+            crate::error::MppError::InvalidConfig(
+                "currency not configured — use Mpp::create_movement() or set currency".into(),
+            )
+        })?;
+        let recipient = self.recipient.as_deref().ok_or_else(|| {
+            crate::error::MppError::InvalidConfig(
+                "recipient not configured — use Mpp::create_movement() or set recipient".into(),
+            )
+        })?;
+        Ok((currency, recipient))
     }
 }
 
@@ -671,8 +536,6 @@ mod tests {
     use super::*;
     use crate::protocol::core::{ChallengeEcho, PaymentPayload};
     use crate::protocol::traits::ErrorCode;
-    #[cfg(feature = "tempo")]
-    use crate::server::{tempo, ChargeOptions, TempoConfig};
     use std::future::Future;
 
     #[derive(Clone)]
@@ -777,24 +640,6 @@ mod tests {
         assert!(payment.recipient().is_none());
     }
 
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_charge_challenge_generation() {
-        let payment = Mpp::new(MockMethod, "api.example.com", "test-secret");
-        let challenge = payment
-            .charge_challenge(
-                "1000000",
-                "0x20c0000000000000000000000000000000000000",
-                "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-            )
-            .unwrap();
-
-        assert_eq!(challenge.realm, "api.example.com");
-        assert_eq!(challenge.method.as_str(), "tempo");
-        assert_eq!(challenge.intent.as_str(), "charge");
-        assert_eq!(challenge.id.len(), 43);
-    }
-
     #[tokio::test]
     async fn test_verify_returns_receipt_for_success() {
         let payment = Mpp::new(SuccessReceiptMethod, "api.example.com", "secret");
@@ -828,127 +673,6 @@ mod tests {
         let mpp_err: MppError = err.into();
         let problem = mpp_err.to_problem_details(None);
         assert_eq!(problem.status, 402);
-    }
-
-    #[cfg(feature = "tempo")]
-    fn create_test_mpp() -> Mpp<crate::server::TempoChargeMethod<crate::server::TempoProvider>> {
-        Mpp::create(
-            tempo(TempoConfig {
-                recipient: "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-            })
-            .secret_key("test-secret"),
-        )
-        .unwrap()
-    }
-
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_mpp_create() {
-        let mpp = create_test_mpp();
-        assert_eq!(mpp.realm(), "MPP Payment");
-        // No chain_id set → unknown chain → defaults to pathUSD
-        assert_eq!(
-            mpp.currency(),
-            Some("0x20c0000000000000000000000000000000000000")
-        );
-        assert_eq!(
-            mpp.recipient(),
-            Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2")
-        );
-        assert_eq!(mpp.decimals(), 6);
-    }
-
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_mpp_create_requires_secret_key() {
-        struct EnvGuard(Option<String>);
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                if let Some(value) = &self.0 {
-                    unsafe { std::env::set_var(SECRET_KEY_ENV_VAR, value) };
-                } else {
-                    unsafe { std::env::remove_var(SECRET_KEY_ENV_VAR) };
-                }
-            }
-        }
-
-        let _guard = EnvGuard(std::env::var(SECRET_KEY_ENV_VAR).ok());
-        unsafe { std::env::remove_var(SECRET_KEY_ENV_VAR) };
-
-        let result = Mpp::create(tempo(TempoConfig {
-            recipient: "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-        }));
-        match result {
-            Ok(_) => panic!("missing secret key should fail creation"),
-            Err(err) => assert!(err.to_string().contains("Missing secret key")),
-        }
-
-        unsafe { std::env::set_var(SECRET_KEY_ENV_VAR, "   ") };
-        let whitespace_env = Mpp::create(tempo(TempoConfig {
-            recipient: "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-        }));
-        match whitespace_env {
-            Ok(_) => panic!("whitespace-only env secret key should fail creation"),
-            Err(err) => assert!(err.to_string().contains("Missing secret key")),
-        }
-
-        let whitespace_builder = Mpp::create(
-            tempo(TempoConfig {
-                recipient: "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-            })
-            .secret_key(""),
-        );
-        match whitespace_builder {
-            Ok(_) => panic!("empty builder secret key should fail creation"),
-            Err(err) => assert!(err.to_string().contains("Missing secret key")),
-        }
-    }
-
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_charge_dollar_amount() {
-        let mpp = create_test_mpp();
-
-        let challenge = mpp.charge("0.10").unwrap();
-        assert_eq!(challenge.method.as_str(), "tempo");
-        assert_eq!(challenge.intent.as_str(), "charge");
-        assert_eq!(challenge.realm, "MPP Payment");
-
-        let request: ChargeRequest = challenge.request.decode().unwrap();
-        assert_eq!(request.amount, "100000");
-        assert_eq!(
-            request.currency,
-            "0x20c0000000000000000000000000000000000000"
-        );
-        assert_eq!(
-            request.recipient,
-            Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".to_string())
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_charge_one_dollar() {
-        let mpp = create_test_mpp();
-        let challenge = mpp.charge("1").unwrap();
-        let request: ChargeRequest = challenge.request.decode().unwrap();
-        assert_eq!(request.amount, "1000000");
-    }
-
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_charge_default_expires() {
-        let mpp = create_test_mpp();
-        let challenge = mpp.charge("1").unwrap();
-        assert!(challenge.expires.is_some());
-    }
-
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_charge_requires_bound_currency() {
-        let payment = Mpp::new(MockMethod, "api.example.com", "secret");
-        let result = payment.charge("1.00");
-        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -992,192 +716,6 @@ mod tests {
         assert_eq!(receipt.reference, "0xabc123");
     }
 
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_charge_with_options() {
-        let mpp = create_test_mpp();
-        let challenge = mpp
-            .charge_with_options(
-                "5.50",
-                ChargeOptions {
-                    description: Some("API access fee"),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-
-        let request: ChargeRequest = challenge.request.decode().unwrap();
-        assert_eq!(request.amount, "5500000");
-        assert_eq!(challenge.description, Some("API access fee".to_string()));
-    }
-
-    // ── Real HMAC challenge verification tests ─────────────────────────
-
-    /// A mock ChargeMethod that always returns a success receipt, using
-    /// the "tempo" method name so it matches challenges from create_test_mpp().
-    #[derive(Clone)]
-    struct TempoSuccessMethod;
-
-    #[allow(clippy::manual_async_fn)]
-    impl ChargeMethod for TempoSuccessMethod {
-        fn method(&self) -> &str {
-            "tempo"
-        }
-
-        fn verify(
-            &self,
-            _credential: &PaymentCredential,
-            _request: &ChargeRequest,
-        ) -> impl Future<Output = std::result::Result<Receipt, VerificationError>> + Send {
-            async { Ok(Receipt::success("tempo", "0xtxhash")) }
-        }
-    }
-
-    /// Helper: build an Mpp with TempoSuccessMethod whose realm, secret_key,
-    /// currency, recipient, and decimals match create_test_mpp().
-    #[cfg(feature = "tempo")]
-    fn create_hmac_test_mpp() -> Mpp<TempoSuccessMethod> {
-        Mpp {
-            method: TempoSuccessMethod,
-            session_method: None,
-            realm: "MPP Payment".into(),
-            secret_key: "test-secret".into(),
-            currency: Some("0x20c0000000000000000000000000000000000000".into()),
-            recipient: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".into()),
-            decimals: DEFAULT_DECIMALS,
-            fee_payer: false,
-            chain_id: None,
-        }
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_hmac_verify_happy_path() {
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp.charge("0.10").unwrap();
-
-        let echo = challenge.to_echo();
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-
-        let receipt = mpp.verify_credential(&credential).await.unwrap();
-        assert!(receipt.is_success());
-        assert_eq!(receipt.reference, "0xtxhash");
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_hmac_tampered_request_rejected() {
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp.charge("0.10").unwrap();
-
-        let mut echo = challenge.to_echo();
-        // Tamper: replace the request with a different amount
-        let tampered_request = ChargeRequest {
-            amount: "999999".into(),
-            currency: "0x20c0000000000000000000000000000000000000".into(),
-            recipient: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".into()),
-            ..Default::default()
-        };
-        let encoded = crate::protocol::core::Base64UrlJson::from_typed(&tampered_request).unwrap();
-        echo.request = encoded;
-
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-        let result = mpp.verify_credential(&credential).await;
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().message.contains("mismatch"),
-            "expected HMAC mismatch error"
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_hmac_tampered_realm_ignored() {
-        // The server recomputes the HMAC using its own realm (self.realm),
-        // not the echoed realm from the credential. So tampering the echoed
-        // realm has no effect on HMAC verification — the server is the
-        // authority on its own realm. This is correct security behavior.
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp.charge("0.10").unwrap();
-
-        let mut echo = challenge.to_echo();
-        echo.realm = "evil.example.com".into();
-
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-        let result = mpp.verify_credential(&credential).await;
-        // Verification succeeds because the server uses its own realm for
-        // HMAC recomputation, not the echoed one.
-        assert!(
-            result.is_ok(),
-            "echoed realm is ignored by server HMAC check"
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_hmac_tampered_method_rejected() {
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp.charge("0.10").unwrap();
-
-        let mut echo = challenge.to_echo();
-        echo.method = "evil-method".into();
-
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-        let result = mpp.verify_credential(&credential).await;
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().message.contains("mismatch"),
-            "expected HMAC mismatch error"
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_hmac_tampered_intent_rejected() {
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp.charge("0.10").unwrap();
-
-        let mut echo = challenge.to_echo();
-        echo.intent = "session".into();
-
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-        let result = mpp.verify_credential(&credential).await;
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().message.contains("mismatch"),
-            "expected HMAC mismatch error"
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_hmac_charge_with_options_roundtrip() {
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp
-            .charge_with_options(
-                "2.50",
-                ChargeOptions {
-                    description: Some("Premium access"),
-                    fee_payer: true,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-
-        // Verify challenge fields
-        assert_eq!(challenge.description, Some("Premium access".to_string()));
-        let request: ChargeRequest = challenge.request.decode().unwrap();
-        assert_eq!(request.amount, "2500000");
-        let details = request.method_details.unwrap();
-        assert_eq!(details["feePayer"], serde_json::json!(true));
-
-        // Roundtrip: credential built from this challenge verifies
-        let echo = challenge.to_echo();
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-        let receipt = mpp.verify_credential(&credential).await.unwrap();
-        assert!(receipt.is_success());
-    }
-
     // ── Mock SessionMethod for session verification tests ─────────────
 
     #[derive(Clone)]
@@ -1189,7 +727,7 @@ mod tests {
     impl MockSessionMethod {
         fn success() -> Self {
             Self {
-                receipt: Receipt::success("tempo", "0xsession_ref"),
+                receipt: Receipt::success("movement", "0xsession_ref"),
                 management_response: None,
             }
         }
@@ -1202,7 +740,7 @@ mod tests {
 
     impl crate::protocol::traits::SessionMethod for MockSessionMethod {
         fn method(&self) -> &str {
-            "tempo"
+            "movement"
         }
 
         fn verify_session(
@@ -1240,7 +778,7 @@ mod tests {
 
     impl crate::protocol::traits::SessionMethod for MockFailingSessionMethod {
         fn method(&self) -> &str {
-            "tempo"
+            "movement"
         }
 
         fn verify_session(
@@ -1261,454 +799,14 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "tempo")]
-    fn create_session_test_mpp() -> Mpp<TempoSuccessMethod, MockSessionMethod> {
-        Mpp {
-            method: TempoSuccessMethod,
-            session_method: Some(MockSessionMethod::success()),
-            realm: "MPP Payment".into(),
-            secret_key: "test-secret".into(),
-            currency: Some("0x20c0000000000000000000000000000000000000".into()),
-            recipient: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".into()),
-            decimals: DEFAULT_DECIMALS,
-            fee_payer: false,
-            chain_id: None,
-        }
-    }
-
-    #[cfg(feature = "tempo")]
-    fn make_session_credential(
-        mpp: &Mpp<TempoSuccessMethod, MockSessionMethod>,
-        payload: serde_json::Value,
-    ) -> PaymentCredential {
-        let challenge = mpp
-            .session_challenge(
-                "1000",
-                "0x20c0000000000000000000000000000000000000",
-                "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-            )
-            .unwrap();
-        PaymentCredential::new(challenge.to_echo(), payload)
-    }
-
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_session_challenge_roundtrip() {
-        let mpp = create_session_test_mpp();
-        let challenge = mpp
-            .session_challenge(
-                "1000",
-                "0x20c0000000000000000000000000000000000000",
-                "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-            )
-            .unwrap();
-        assert_eq!(challenge.method.as_str(), "tempo");
-        assert_eq!(challenge.intent.as_str(), "session");
-        assert!(!challenge.id.is_empty());
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_session_happy_path() {
-        let mpp = create_session_test_mpp();
-        let credential = make_session_credential(
-            &mpp,
-            serde_json::json!({
-                "action": "voucher",
-                "channelId": "0xabc",
-                "cumulativeAmount": "5000",
-                "signature": "0xdef"
-            }),
-        );
-
-        let result = mpp.verify_session(&credential).await;
-        assert!(result.is_ok());
-        let session_result = result.unwrap();
-        assert!(session_result.receipt.is_success());
-        assert_eq!(session_result.receipt.reference, "0xsession_ref");
-        assert!(session_result.management_response.is_none());
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_session_management_response() {
-        let mock_session = MockSessionMethod::success()
-            .with_management_response(serde_json::json!({"status": "ok", "channelId": "0xabc"}));
-        let mpp: Mpp<TempoSuccessMethod, MockSessionMethod> = Mpp {
-            method: TempoSuccessMethod,
-            session_method: Some(mock_session),
-            realm: "MPP Payment".into(),
-            secret_key: "test-secret".into(),
-            currency: Some("0x20c0000000000000000000000000000000000000".into()),
-            recipient: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".into()),
-            decimals: DEFAULT_DECIMALS,
-            fee_payer: false,
-            chain_id: None,
-        };
-
-        let challenge = mpp
-            .session_challenge(
-                "1000",
-                "0x20c0000000000000000000000000000000000000",
-                "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-            )
-            .unwrap();
-
-        let echo = challenge.to_echo();
-        let payload_json = serde_json::json!({
-            "action": "open",
-            "type": "transaction",
-            "channelId": "0xabc",
-            "transaction": "0x1234",
-            "cumulativeAmount": "5000",
-            "signature": "0xdef"
-        });
-        let credential = PaymentCredential::new(echo, payload_json);
-
-        let result = mpp.verify_session(&credential).await;
-        assert!(result.is_ok());
-        let session_result = result.unwrap();
-        assert!(session_result.management_response.is_some());
-        let mgmt = session_result.management_response.unwrap();
-        assert_eq!(mgmt["channelId"], "0xabc");
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_session_no_session_method() {
-        let mpp: Mpp<TempoSuccessMethod, MockSessionMethod> = Mpp {
-            method: TempoSuccessMethod,
-            session_method: None,
-            realm: "MPP Payment".into(),
-            secret_key: "test-secret".into(),
-            currency: Some("0x20c0000000000000000000000000000000000000".into()),
-            recipient: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".into()),
-            decimals: DEFAULT_DECIMALS,
-            fee_payer: false,
-            chain_id: None,
-        };
-
-        let echo = ChallengeEcho {
-            id: "test".into(),
-            realm: "MPP Payment".into(),
-            method: "tempo".into(),
-            intent: "session".into(),
-            request: crate::protocol::core::Base64UrlJson::from_raw("eyJ0ZXN0IjoidmFsdWUifQ"),
-            expires: None,
-            digest: None,
-            opaque: None,
-        };
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0x123"));
-
-        let result = mpp.verify_session(&credential).await;
-        let err = result.unwrap_err();
-        assert!(err.message.contains("No session method"));
-        assert!(
-            err.code.is_none(),
-            "no-session-method should not have an error code"
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_session_hmac_mismatch() {
-        let mpp = create_session_test_mpp();
-        let challenge = mpp
-            .session_challenge(
-                "1000",
-                "0x20c0000000000000000000000000000000000000",
-                "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-            )
-            .unwrap();
-
-        let mut echo = challenge.to_echo();
-        let tampered = crate::protocol::intents::SessionRequest {
-            amount: "999999".into(),
-            currency: "0x20c0000000000000000000000000000000000000".into(),
-            ..Default::default()
-        };
-        let encoded = crate::protocol::core::Base64UrlJson::from_typed(&tampered).unwrap();
-        echo.request = encoded;
-
-        let payload_json = serde_json::json!({
-            "action": "voucher",
-            "channelId": "0xabc",
-            "cumulativeAmount": "5000",
-            "signature": "0xdef"
-        });
-        let credential = PaymentCredential::new(echo, payload_json);
-
-        let result = mpp.verify_session(&credential).await;
-        let err = result.unwrap_err();
-        assert_eq!(err.code, Some(ErrorCode::CredentialMismatch));
-    }
-
-    #[cfg(feature = "tempo")]
-    #[test]
-    fn test_session_challenge_with_details() {
-        let mpp = create_session_test_mpp();
-        let challenge = mpp
-            .session_challenge_with_details(
-                "1000",
-                "0x20c0000000000000000000000000000000000000",
-                "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-                super::super::SessionChallengeOptions {
-                    unit_type: Some("second"),
-                    suggested_deposit: Some("60000"),
-                    fee_payer: true,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-
-        assert_eq!(challenge.method.as_str(), "tempo");
-        assert_eq!(challenge.intent.as_str(), "session");
-        let request: crate::protocol::intents::SessionRequest = challenge.request.decode().unwrap();
-        assert_eq!(request.amount, "1000");
-        assert_eq!(request.unit_type.as_deref(), Some("second"));
-        assert_eq!(request.suggested_deposit.as_deref(), Some("60000"));
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_session_method_returns_error() {
-        let mock_session = MockFailingSessionMethod::with_error(
-            ErrorCode::InsufficientBalance,
-            "channel balance exhausted",
-        );
-        let mpp: Mpp<TempoSuccessMethod, MockFailingSessionMethod> = Mpp {
-            method: TempoSuccessMethod,
-            session_method: Some(mock_session),
-            realm: "MPP Payment".into(),
-            secret_key: "test-secret".into(),
-            currency: Some("0x20c0000000000000000000000000000000000000".into()),
-            recipient: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".into()),
-            decimals: DEFAULT_DECIMALS,
-            fee_payer: false,
-            chain_id: None,
-        };
-
-        let challenge = mpp
-            .session_challenge(
-                "1000",
-                "0x20c0000000000000000000000000000000000000",
-                "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-            )
-            .unwrap();
-
-        let echo = challenge.to_echo();
-        let payload_json = serde_json::json!({
-            "action": "voucher",
-            "channelId": "0xabc",
-            "cumulativeAmount": "5000",
-            "signature": "0xdef"
-        });
-        let credential = PaymentCredential::new(echo, payload_json);
-
-        let result = mpp.verify_session(&credential).await;
-        let err = result.unwrap_err();
-        assert_eq!(err.code, Some(ErrorCode::InsufficientBalance));
-        assert!(err.message.contains("channel balance exhausted"));
-    }
-
     #[test]
     fn test_session_verify_result_debug() {
         let result = SessionVerifyResult {
-            receipt: Receipt::success("tempo", "0xref"),
+            receipt: Receipt::success("movement", "0xref"),
             management_response: Some(serde_json::json!({"status": "ok"})),
         };
         let debug = format!("{:?}", result);
         assert!(debug.contains("0xref"));
         assert!(debug.contains("status"));
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_expired_challenge_rejected() {
-        let mpp = create_hmac_test_mpp();
-
-        // Create a credential with an expired timestamp so the HMAC matches
-        let past = (time::OffsetDateTime::now_utc() - time::Duration::minutes(10))
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap();
-
-        let challenge = mpp
-            .charge_with_options(
-                "0.10",
-                crate::server::ChargeOptions {
-                    expires: Some(&past),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let echo = challenge.to_echo();
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-
-        let result = mpp.verify_credential(&credential).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.code, Some(ErrorCode::Expired));
-        assert!(
-            err.message.contains("expired"),
-            "expected expiry error, got: {}",
-            err.message
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_non_expired_challenge_accepted() {
-        let mpp = create_hmac_test_mpp();
-        // Default charge generates an expires 5 minutes in the future
-        let challenge = mpp.charge("0.10").unwrap();
-        assert!(
-            challenge.expires.is_some(),
-            "charge should have default expires"
-        );
-
-        let echo = challenge.to_echo();
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-
-        let result = mpp.verify_credential(&credential).await;
-        assert!(result.is_ok(), "non-expired challenge should be accepted");
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_malformed_expires_rejected() {
-        let mpp = create_hmac_test_mpp();
-
-        // Manually create a credential with a malformed expires that has a valid HMAC
-        let challenge = mpp
-            .charge_with_options(
-                "0.10",
-                crate::server::ChargeOptions {
-                    expires: Some("not-a-timestamp"),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let echo = challenge.to_echo();
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-
-        let result = mpp.verify_credential(&credential).await;
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().message.contains("Invalid expires"),
-            "expected invalid expires error"
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_credential_with_wrong_amount_rejected() {
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp.charge("0.10").unwrap(); // 100000 base units
-
-        let echo = challenge.to_echo();
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-
-        let wrong_request = ChargeRequest {
-            amount: "999999999".into(),
-            currency: "0x20c0000000000000000000000000000000000000".into(),
-            recipient: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".into()),
-            ..Default::default()
-        };
-        let result = mpp
-            .verify_credential_with_expected_request(&credential, &wrong_request)
-            .await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.code, Some(ErrorCode::CredentialMismatch));
-        assert!(
-            err.message.contains("Amount mismatch"),
-            "expected amount mismatch error, got: {}",
-            err.message
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_credential_with_correct_request_accepted() {
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp.charge("0.10").unwrap(); // 100000 base units
-
-        let echo = challenge.to_echo();
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-
-        let expected_request = ChargeRequest {
-            amount: "100000".into(),
-            currency: "0x20c0000000000000000000000000000000000000".into(),
-            recipient: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2".into()),
-            ..Default::default()
-        };
-        let result = mpp
-            .verify_credential_with_expected_request(&credential, &expected_request)
-            .await;
-        assert!(result.is_ok(), "correct request should be accepted");
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_credential_with_wrong_recipient_rejected() {
-        let mpp = create_hmac_test_mpp();
-        let challenge = mpp.charge("0.10").unwrap();
-
-        let echo = challenge.to_echo();
-        let credential = PaymentCredential::new(echo, PaymentPayload::hash("0xdeadbeef"));
-
-        let wrong_recipient = ChargeRequest {
-            amount: "100000".into(),
-            currency: "0x20c0000000000000000000000000000000000000".into(),
-            recipient: Some("0x0000000000000000000000000000000000000001".into()),
-            ..Default::default()
-        };
-        let result = mpp
-            .verify_credential_with_expected_request(&credential, &wrong_recipient)
-            .await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.code, Some(ErrorCode::CredentialMismatch));
-        assert!(
-            err.message.contains("Recipient mismatch"),
-            "expected recipient mismatch error, got: {}",
-            err.message
-        );
-    }
-
-    #[cfg(feature = "tempo")]
-    #[tokio::test]
-    async fn test_verify_session_expired_challenge_rejected() {
-        let mpp = create_session_test_mpp();
-
-        let past = (time::OffsetDateTime::now_utc() - time::Duration::minutes(10))
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap();
-
-        let challenge = mpp
-            .session_challenge_with_details(
-                "1000",
-                "0x20c0000000000000000000000000000000000000",
-                "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
-                crate::server::SessionChallengeOptions {
-                    expires: Some(&past),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-
-        let echo = challenge.to_echo();
-        let payload_json = serde_json::json!({
-            "action": "voucher",
-            "channelId": "0xabc",
-            "cumulativeAmount": "5000",
-            "signature": "0xdef"
-        });
-        let credential = PaymentCredential::new(echo, payload_json);
-
-        let result = mpp.verify_session(&credential).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.code, Some(ErrorCode::Expired));
     }
 }

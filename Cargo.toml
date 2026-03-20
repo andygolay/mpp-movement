@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/andygolay/mpp-movement"
 homepage = "https://github.com/andygolay/mpp-movement"
 readme = "README.md"
-keywords = ["http", "payments", "402", "authentication"]
+keywords = ["http", "payments", "402", "authentication", "movement"]
 categories = ["web-programming", "authentication", "cryptography"]
 
 [features]
@@ -18,12 +18,13 @@ client = ["reqwest"]
 server = ["tokio", "futures-core", "async-stream"]
 
 # Method implementations
-evm = ["alloy", "hex", "rand"]
-tempo = ["evm", "tempo-alloy", "tempo-primitives", "uuid"]
 movement = ["ed25519-dalek", "sha3", "rand", "hex"]
 
 # Utilities
 utils = ["hex", "rand"]
+
+# Observability (structured logging via tracing)
+observability = ["tracing"]
 
 # Middleware support (requires client)
 middleware = ["client", "reqwest-middleware", "async-trait", "anyhow", "http-types"]
@@ -33,9 +34,6 @@ tower = ["dep:tower-layer", "dep:tower-service", "http-types", "dep:http-body", 
 
 # Axum middleware support (server-side convenience)
 axum = ["dep:axum-core", "server", "http-types"]
-
-# Integration tests (requires a running Tempo localnet)
-integration = ["tempo", "server", "client", "axum"]
 
 [dependencies]
 # Core dependencies (always included)
@@ -51,23 +49,16 @@ sha2 = "0.10"
 hex = { version = "0.4", optional = true }
 base64 = "0.22"
 rand = { version = "0.9", optional = true }
-uuid = { version = "1", features = ["v4"], optional = true }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"], optional = true }
 futures-core = { version = "0.3", optional = true }
 async-stream = { version = "0.3", optional = true }
-alloy = { version = "1.2", features = ["full"], optional = true }
 
 # Movement dependencies (optional)
 ed25519-dalek = { version = "2", features = ["rand_core"], optional = true }
 sha3 = { version = "0.10", optional = true }
 
-# Tempo dependencies (optional)
-# Note: tempo feature requires git dependency - add to your Cargo.toml:
-#   [patch.crates-io]
-#   tempo-alloy = { git = "https://github.com/tempoxyz/tempo" }
-#   tempo-primitives = { git = "https://github.com/tempoxyz/tempo" }
-tempo-alloy = { version = "1", optional = true }
-tempo-primitives = { version = "1", optional = true }
+# Observability (optional)
+tracing = { version = "0.1", optional = true }
 
 # HTTP client dependencies (optional)
 reqwest = { version = "0.12", features = ["json"], optional = true }
@@ -89,7 +80,3 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 axum = { version = "0.8" }
 reqwest = { version = "0.12", features = ["json"] }
 hex = "0.4"
-
-# [patch.crates-io]
-# tempo-alloy = { git = "https://github.com/tempoxyz/tempo" }
-# tempo-primitives = { git = "https://github.com/tempoxyz/tempo" }

@@ -101,12 +101,24 @@ pub struct TransactionSignature {
     pub signature: String,
 }
 
+/// Default maximum gas amount for transactions.
+pub const DEFAULT_MAX_GAS_AMOUNT: &str = "200000";
+
+/// Default gas unit price.
+pub const DEFAULT_GAS_UNIT_PRICE: &str = "100";
+
+/// Default request timeout in seconds.
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
 impl MovementRestClient {
-    /// Create a new REST client.
+    /// Create a new REST client with a 30-second request timeout.
     pub fn new(rest_url: &str) -> Self {
         Self {
             rest_url: rest_url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 
@@ -215,6 +227,7 @@ impl MovementRestClient {
 
     /// Build, sign, and submit an entry function transaction.
     ///
+    /// Uses default gas parameters. For custom gas, use [`build_sign_submit_with_gas`].
     /// Returns the transaction hash.
     pub async fn build_sign_submit(
         &self,
@@ -222,21 +235,42 @@ impl MovementRestClient {
         sender: &str,
         payload: EntryFunctionPayload,
     ) -> Result<String> {
+        self.build_sign_submit_with_gas(
+            signing_key,
+            sender,
+            payload,
+            DEFAULT_MAX_GAS_AMOUNT,
+            DEFAULT_GAS_UNIT_PRICE,
+        )
+        .await
+    }
+
+    /// Build, sign, and submit an entry function transaction with custom gas parameters.
+    ///
+    /// Returns the transaction hash.
+    pub async fn build_sign_submit_with_gas(
+        &self,
+        signing_key: &SigningKey,
+        sender: &str,
+        payload: EntryFunctionPayload,
+        max_gas_amount: &str,
+        gas_unit_price: &str,
+    ) -> Result<String> {
         // Get sequence number.
         let account = self.get_account(sender).await?;
 
         // Build expiration (5 minutes from now).
         let expiration = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .map_err(|e| MppError::Http(format!("system clock error: {}", e)))?
             .as_secs()
             + 300;
 
         let request = TransactionRequest {
             sender: sender.to_string(),
             sequence_number: account.sequence_number,
-            max_gas_amount: "200000".to_string(),
-            gas_unit_price: "100".to_string(),
+            max_gas_amount: max_gas_amount.to_string(),
+            gas_unit_price: gas_unit_price.to_string(),
             expiration_timestamp_secs: expiration.to_string(),
             payload,
         };

@@ -34,6 +34,14 @@ impl MovementNetwork {
         super::MOVE_TOKEN_METADATA
     }
 
+    /// Returns the default deployed TempoStreamChannel module address for this network.
+    pub const fn default_module_address(self) -> &'static str {
+        match self {
+            Self::Mainnet => super::DEFAULT_MODULE_ADDRESS_MAINNET,
+            Self::Testnet => super::DEFAULT_MODULE_ADDRESS_TESTNET,
+        }
+    }
+
     /// Returns a string identifier for this network.
     pub const fn as_str(self) -> &'static str {
         match self {

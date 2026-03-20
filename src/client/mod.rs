@@ -6,22 +6,20 @@
 //!
 //! - [`PaymentProvider`]: Trait for payment providers
 //! - [`Fetch`]: Extension trait for reqwest with `.send_with_payment()` method
-//! - [`TempoProvider`]: Tempo blockchain provider (requires `tempo`)
+//! - [`MovementProvider`]: Movement charge provider
+//! - [`MovementSessionProvider`]: Movement session provider (auto-manages channels)
 //!
 //! # Example
 //!
 //! ```ignore
-//! use mpp::client::{Fetch, TempoProvider};
+//! use mpp::client::{Fetch, MovementProvider};
 //!
-//! let provider = TempoProvider::new(signer, "https://rpc.moderato.tempo.xyz")?;
+//! let provider = MovementProvider::new(signing_key, "https://testnet.movementnetwork.xyz/v1")?;
 //! let resp = client.get(url).send_with_payment(&provider).await?;
 //! ```
 
 mod error;
 mod provider;
-
-#[cfg(feature = "tempo")]
-pub mod tempo;
 
 #[cfg(feature = "movement")]
 pub mod movement;
@@ -41,12 +39,6 @@ pub use fetch::PaymentExt as Fetch;
 #[cfg(feature = "middleware")]
 pub use middleware::PaymentMiddleware;
 
-// Re-export Tempo types at client level for convenience
-#[cfg(feature = "tempo")]
-pub use tempo::{AutoswapConfig, TempoClientError, TempoProvider};
-#[cfg(feature = "tempo")]
-pub use tempo_alloy::TempoNetwork;
-
 // Re-export Movement types at client level
 #[cfg(feature = "movement")]
-pub use movement::MovementProvider;
+pub use movement::{MovementProvider, MovementSessionProvider};

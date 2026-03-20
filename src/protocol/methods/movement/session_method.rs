@@ -6,6 +6,29 @@
 use std::future::Future;
 use std::sync::Arc;
 
+// Observability macros — compile to no-ops when the `observability` feature is disabled.
+macro_rules! mpp_info {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "observability")]
+        tracing::info!($($arg)*);
+    };
+}
+
+#[allow(unused_macros)]
+macro_rules! mpp_warn {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "observability")]
+        tracing::warn!($($arg)*);
+    };
+}
+
+macro_rules! mpp_error {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "observability")]
+        tracing::error!($($arg)*);
+    };
+}
+
 use super::session::{MovementSessionMethodDetails, SessionCredentialPayload};
 use super::voucher::verify_voucher;
 use super::{INTENT_SESSION, METHOD_NAME};
@@ -187,6 +210,103 @@ pub struct OnChainChannel {
     pub finalized: bool,
 }
 
+/// On-chain transaction verification result.
+#[derive(Debug, Clone)]
+pub struct OnChainTransaction {
+    pub hash: String,
+    pub success: bool,
+    pub vm_status: String,
+}
+
+/// Verify that a transaction succeeded on-chain via Movement REST API.
+///
+/// Fetches the transaction by hash and checks `success == true`.
+/// Returns an error if the transaction failed, is pending, or not found.
+pub async fn verify_transaction_on_chain(
+    rest_url: &str,
+    tx_hash: &str,
+) -> Result<OnChainTransaction, VerificationError> {
+    #[cfg(not(feature = "client"))]
+    {
+        let _ = (rest_url, tx_hash);
+        Err(VerificationError::network_error(
+            "on-chain transaction verification requires the 'client' feature (reqwest)",
+        ))
+    }
+
+    #[cfg(feature = "client")]
+    {
+        let hash = tx_hash.strip_prefix("0x").unwrap_or(tx_hash);
+        let url = format!(
+            "{}/transactions/by_hash/0x{}",
+            rest_url.trim_end_matches('/'),
+            hash
+        );
+
+        let client = reqwest::Client::new();
+        let resp = client.get(&url).send().await.map_err(|e| {
+            VerificationError::network_error(format!("transaction lookup failed: {}", e))
+        })?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(VerificationError::pending(
+                "transaction not yet confirmed on-chain",
+            ));
+        }
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(VerificationError::network_error(format!(
+                "transaction lookup failed ({}): {}",
+                status, text
+            )));
+        }
+
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
+            VerificationError::network_error(format!("failed to parse transaction info: {}", e))
+        })?;
+
+        let success = body.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+        let vm_status = body
+            .get("vm_status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let hash_str = body
+            .get("hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or(tx_hash)
+            .to_string();
+
+        // Check if it's still pending (type == "pending_transaction")
+        let tx_type = body
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if tx_type == "pending_transaction" {
+            return Err(VerificationError::pending(
+                "transaction is pending confirmation",
+            ));
+        }
+
+        if !success {
+            mpp_error!(tx_hash = %tx_hash, vm_status = %vm_status, "transaction failed on-chain");
+            return Err(VerificationError::transaction_failed(format!(
+                "transaction failed on-chain: {}",
+                vm_status
+            )));
+        }
+
+        mpp_info!(tx_hash = %tx_hash, "transaction verified on-chain");
+        Ok(OnChainTransaction {
+            hash: hash_str,
+            success,
+            vm_status,
+        })
+    }
+}
+
 /// Read channel state from the Move contract via Movement REST API.
 ///
 /// Calls the `get_channel` view function.
@@ -305,6 +425,38 @@ impl Default for SessionMethodConfig {
     }
 }
 
+impl SessionMethodConfig {
+    /// Create a config from environment variables, falling back to defaults.
+    ///
+    /// Checks `MOVEMENT_MODULE_ADDRESS` for the module/registry address and
+    /// `MOVEMENT_REST_URL` for the REST API URL.
+    pub fn from_env() -> Self {
+        let module_address = std::env::var(super::MODULE_ADDRESS_ENV_VAR)
+            .unwrap_or_else(|_| super::DEFAULT_MODULE_ADDRESS.to_string());
+        let registry_address = module_address.clone();
+        let rest_url = std::env::var("MOVEMENT_REST_URL")
+            .unwrap_or_else(|_| super::DEFAULT_REST_URL_TESTNET.to_string());
+
+        Self {
+            module_address,
+            registry_address,
+            rest_url,
+            ..Default::default()
+        }
+    }
+
+    /// Create a config for a specific Movement network.
+    pub fn for_network(network: super::MovementNetwork) -> Self {
+        Self {
+            module_address: network.default_module_address().to_string(),
+            registry_address: network.default_module_address().to_string(),
+            rest_url: network.default_rest_url().to_string(),
+            token_metadata: network.default_currency().to_string(),
+            min_voucher_delta: 0,
+        }
+    }
+}
+
 /// Movement session method for server-side session payment verification.
 ///
 /// Handles four channel lifecycle actions:
@@ -365,6 +517,7 @@ impl SessionMethod {
 
     /// Handle 'open' action: verify the open tx landed on-chain, read channel state,
     /// verify initial voucher, create channel in store.
+    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, payload, details), fields(action = "open")))]
     async fn handle_open(
         &self,
         payload: &SessionCredentialPayload,
@@ -389,8 +542,10 @@ impl SessionMethod {
             .unwrap_or(module_address);
         let rest_url = self.resolve_rest_url();
 
-        // TODO: verify tx_hash actually succeeded on-chain via REST API
-        // For now, read the channel state directly.
+        // Verify the open transaction actually succeeded on-chain.
+        mpp_info!(tx_hash = %tx_hash, channel_id = %channel_id_str, "verifying open transaction on-chain");
+        verify_transaction_on_chain(rest_url, tx_hash).await?;
+
         let on_chain =
             get_on_chain_channel(rest_url, module_address, registry_address, channel_id_str)
                 .await?;
@@ -409,9 +564,10 @@ impl SessionMethod {
             .map_err(|_| VerificationError::invalid_payload("invalid cumulativeAmount"))?;
 
         if cumulative_amount > on_chain.deposit {
-            return Err(VerificationError::amount_exceeds_deposit(
-                "voucher amount exceeds deposit",
-            ));
+            return Err(VerificationError::amount_exceeds_deposit(format!(
+                "voucher amount {} exceeds deposit {}",
+                cumulative_amount, on_chain.deposit
+            )));
         }
 
         // Verify voucher signature.
@@ -481,10 +637,12 @@ impl SessionMethod {
             )
             .await?;
 
+        mpp_info!(channel_id = %channel_id_str, deposit = on_chain_deposit, "channel opened successfully");
         Ok(Receipt::success(METHOD_NAME, tx_hash))
     }
 
     /// Handle 'topUp' action.
+    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, payload, details), fields(action = "topUp")))]
     async fn handle_top_up(
         &self,
         payload: &SessionCredentialPayload,
@@ -510,15 +668,21 @@ impl SessionMethod {
             .registry_address
             .as_deref()
             .unwrap_or(module_address);
+        let rest_url = self.resolve_rest_url();
+
+        // Verify the top-up transaction actually succeeded on-chain.
+        mpp_info!(tx_hash = %tx_hash, channel_id = %channel_id_str, "verifying top-up transaction on-chain");
+        verify_transaction_on_chain(rest_url, tx_hash).await?;
 
         let on_chain =
-            get_on_chain_channel(self.resolve_rest_url(), module_address, registry_address, channel_id_str)
+            get_on_chain_channel(rest_url, module_address, registry_address, channel_id_str)
                 .await?;
 
         if on_chain.deposit <= channel.deposit {
-            return Err(VerificationError::new(
-                "channel deposit did not increase after topUp",
-            ));
+            return Err(VerificationError::new(format!(
+                "channel deposit did not increase after topUp (on-chain: {}, stored: {})",
+                on_chain.deposit, channel.deposit
+            )));
         }
 
         let new_deposit = on_chain.deposit;
@@ -541,6 +705,7 @@ impl SessionMethod {
     }
 
     /// Handle 'voucher' action — pure off-chain verification, no RPC call.
+    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, payload, details), fields(action = "voucher")))]
     async fn handle_voucher(
         &self,
         payload: &SessionCredentialPayload,
@@ -582,6 +747,7 @@ impl SessionMethod {
     }
 
     /// Handle 'close' action.
+    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, payload, _details), fields(action = "close")))]
     async fn handle_close(
         &self,
         payload: &SessionCredentialPayload,
@@ -611,9 +777,10 @@ impl SessionMethod {
             .map_err(|_| VerificationError::invalid_payload("invalid cumulativeAmount"))?;
 
         if cumulative_amount < channel.highest_voucher_amount {
-            return Err(VerificationError::new(
-                "close voucher amount must be >= highest accepted voucher",
-            ));
+            return Err(VerificationError::new(format!(
+                "close voucher amount {} must be >= highest accepted voucher {}",
+                cumulative_amount, channel.highest_voucher_amount
+            )));
         }
 
         // Verify signature.
@@ -660,6 +827,7 @@ impl SessionMethod {
             )
             .await?;
 
+        mpp_info!(channel_id = %channel_id_str, final_amount = cumulative_amount, "channel closed");
         Ok(Receipt::success(METHOD_NAME, channel_id_str))
     }
 
@@ -673,9 +841,10 @@ impl SessionMethod {
         min_delta: u64,
     ) -> Result<Receipt, VerificationError> {
         if cumulative_amount > channel.deposit {
-            return Err(VerificationError::amount_exceeds_deposit(
-                "voucher amount exceeds deposit",
-            ));
+            return Err(VerificationError::amount_exceeds_deposit(format!(
+                "voucher amount {} exceeds deposit {}",
+                cumulative_amount, channel.deposit
+            )));
         }
 
         // Idempotent accept for replays of the highest voucher.
@@ -771,6 +940,12 @@ impl SessionMethod {
 
         let state =
             updated.ok_or_else(|| VerificationError::channel_not_found("channel not found"))?;
+        mpp_info!(
+            channel_id = %state.channel_id,
+            cumulative_amount = cumulative_amount,
+            delta = delta,
+            "voucher accepted"
+        );
         Ok(Receipt::success(METHOD_NAME, &state.channel_id))
     }
 }
