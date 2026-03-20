@@ -401,7 +401,7 @@ pub async fn get_on_chain_channel(
 /// Configuration for the Movement session method.
 #[derive(Debug, Clone)]
 pub struct SessionMethodConfig {
-    /// Module address where TempoStreamChannel is deployed.
+    /// Module address where MovementStreamChannel is deployed.
     pub module_address: String,
     /// Registry address (usually same as module address).
     pub registry_address: String,

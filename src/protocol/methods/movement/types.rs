@@ -22,7 +22,7 @@ pub struct MovementMethodDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<String>,
 
-    /// The address where the TempoStreamChannel module is deployed.
+    /// The address where the MovementStreamChannel module is deployed.
     #[serde(rename = "moduleAddress", skip_serializing_if = "Option::is_none")]
     pub module_address: Option<String>,
 

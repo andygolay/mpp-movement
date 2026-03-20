@@ -36,7 +36,7 @@ use std::time::Duration;
 const REST_URL: &str = "https://testnet.movementnetwork.xyz/v1";
 const FAUCET_URL: &str = "https://faucet.testnet.movementnetwork.xyz";
 const MODULE_ADDRESS: &str =
-    "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58";
+    "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8";
 
 /// 0.001 MOVE per request (8 decimals).
 const AMOUNT_PER_REQUEST: &str = "100000";

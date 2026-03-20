@@ -1,12 +1,12 @@
 //! Movement Network payment method for Web Payment Auth.
 //!
 //! This module provides Movement-specific implementations for the Machine
-//! Payments Protocol, using the TempoStreamChannel Move contract deployed
+//! Payments Protocol, using the MovementStreamChannel Move contract deployed
 //! on Movement Network.
 //!
-//! # Differences from the Tempo (EVM) method
+//! # Differences from the EVM method
 //!
-//! | Aspect | Tempo (EVM) | Movement |
+//! | Aspect | EVM | Movement |
 //! |--------|-------------|----------|
 //! | Signature | EIP-712 + ECDSA (secp256k1) | ed25519 |
 //! | Serialization | ABI encoding | BCS |
@@ -82,12 +82,12 @@ pub const DEFAULT_FAUCET_URL_TESTNET: &str = "https://faucet.testnet.movementnet
 /// MOVE token FA metadata address.
 pub const MOVE_TOKEN_METADATA: &str = "0xa";
 
-/// Default deployed TempoStreamChannel module address (testnet).
+/// Default deployed MovementStreamChannel module address (testnet).
 pub const DEFAULT_MODULE_ADDRESS: &str = DEFAULT_MODULE_ADDRESS_TESTNET;
 
 /// Default module address for Movement testnet.
 pub const DEFAULT_MODULE_ADDRESS_TESTNET: &str =
-    "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58";
+    "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8";
 
 /// Default module address for Movement mainnet.
 ///
@@ -95,7 +95,7 @@ pub const DEFAULT_MODULE_ADDRESS_TESTNET: &str =
 /// points to the testnet address as a placeholder. Set `MOVEMENT_MODULE_ADDRESS`
 /// env var or use `SessionMethodConfig::from_env()` to override.
 pub const DEFAULT_MODULE_ADDRESS_MAINNET: &str =
-    "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58";
+    "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8";
 
 /// Environment variable for overriding the module address.
 pub const MODULE_ADDRESS_ENV_VAR: &str = "MOVEMENT_MODULE_ADDRESS";
@@ -195,7 +195,7 @@ mod tests {
             "api.example.com",
             "1000000",
             "0xa",
-            "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58",
+            "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8",
         )
         .unwrap();
 
@@ -213,7 +213,7 @@ mod tests {
             amount: "1000000".into(),
             currency: "0xa".into(),
             recipient: Some(
-                "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58".into(),
+                "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8".into(),
             ),
             ..Default::default()
         };

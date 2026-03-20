@@ -46,7 +46,7 @@
 //!
 //! ```ignore
 //! use axum::{routing::get, Router, Json};
-//! use mpp::server::{Mpp, tempo, TempoConfig};
+//! use mpp::server::{Mpp, movement, MovementConfig};
 //! use mpp::server::axum::{MppCharge, ChargeConfig, ChargeChallenger};
 //! use std::sync::Arc;
 //!
@@ -55,7 +55,7 @@
 //!     fn amount() -> &'static str { "0.01" }
 //! }
 //!
-//! let mpp = Mpp::create(tempo(TempoConfig {
+//! let mpp = Mpp::create_movement(movement(MovementConfig {
 //!     recipient: "0xabc...",
 //! })).unwrap();
 //!
@@ -181,7 +181,7 @@ pub struct ChallengeOptions {
 ///
 /// ```ignore
 /// use mpp::server::axum::{ChargeConfig, MppCharge, ChargeChallenger};
-/// use mpp::server::{Mpp, tempo, TempoConfig};
+/// use mpp::server::{Mpp, movement, MovementConfig};
 /// use axum::{routing::get, Router, Json};
 /// use std::sync::Arc;
 ///
@@ -190,7 +190,7 @@ pub struct ChallengeOptions {
 ///     fn amount() -> &'static str { "0.01" }
 /// }
 ///
-/// let mpp = Mpp::create(tempo(TempoConfig {
+/// let mpp = Mpp::create_movement(movement(MovementConfig {
 ///     recipient: "0xabc...",
 /// })).unwrap();
 ///

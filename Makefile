@@ -15,7 +15,7 @@ test:
 test-fast:
 	cargo test --lib -- --quiet
 
-# Integration tests require a running Tempo localnet.
+# Integration tests require a running Movement localnet.
 #   docker compose up -d
 #   make test-integration
 #   docker compose down

@@ -1,7 +1,7 @@
 //! Payment provider trait and implementations.
 //!
 //! The `PaymentProvider` trait abstracts over payment execution, allowing
-//! different payment methods (Tempo, Stripe, etc.) to be used with the
+//! different payment methods (Movement, Stripe, etc.) to be used with the
 //! HTTP client extensions.
 
 use crate::error::MppError;

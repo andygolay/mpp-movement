@@ -267,7 +267,7 @@ pub fn parse_www_authenticate(header: &str) -> Result<PaymentChallenge> {
 ///
 /// let headers = vec![
 ///     "Bearer token",
-///     "Payment id=\"abc\", realm=\"api\", method=\"tempo\", intent=\"charge\", request=\"e30\"",
+///     "Payment id=\"abc\", realm=\"api\", method=\"movement\", intent=\"charge\", request=\"e30\"",
 ///     "Payment id=\"def\", realm=\"api\", method=\"base\", intent=\"charge\", request=\"e30\"",
 /// ];
 /// let challenges = parse_www_authenticate_all(headers);
@@ -824,7 +824,7 @@ mod tests {
     #[test]
     fn test_parse_www_authenticate_rejects_invalid_method_name_dash() {
         let header =
-            r#"Payment id="abc", realm="api", method="tempo-v2", intent="charge", request="e30""#;
+            r#"Payment id="abc", realm="api", method="movement-v2", intent="charge", request="e30""#;
         let err = parse_www_authenticate(header).unwrap_err();
         assert!(err.to_string().contains("Invalid method"));
     }
@@ -832,7 +832,7 @@ mod tests {
     #[test]
     fn test_parse_www_authenticate_rejects_invalid_method_name_digit_prefix() {
         let header =
-            r#"Payment id="abc", realm="api", method="1tempo", intent="charge", request="e30""#;
+            r#"Payment id="abc", realm="api", method="1movement", intent="charge", request="e30""#;
         let err = parse_www_authenticate(header).unwrap_err();
         assert!(err.to_string().contains("Invalid method"));
     }
@@ -840,7 +840,7 @@ mod tests {
     #[test]
     fn test_parse_www_authenticate_rejects_mixed_case_method_name() {
         let header =
-            r#"Payment id="abc", realm="api", method="Tempo", intent="charge", request="e30""#;
+            r#"Payment id="abc", realm="api", method="Movement", intent="charge", request="e30""#;
         let err = parse_www_authenticate(header).unwrap_err();
         assert!(err.to_string().contains("Invalid method"));
     }

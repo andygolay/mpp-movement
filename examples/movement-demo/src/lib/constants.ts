@@ -3,7 +3,7 @@ export const SERVER_URL =
 
 export const MODULE_ADDRESS =
   import.meta.env.VITE_MODULE_ADDRESS ??
-  "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58";
+  "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8";
 
 export const REGISTRY_ADDR =
   import.meta.env.VITE_REGISTRY_ADDR ?? MODULE_ADDRESS;

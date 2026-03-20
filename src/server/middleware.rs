@@ -9,9 +9,9 @@
 //! ```ignore
 //! use axum::{Router, routing::get};
 //! use mpp::server::middleware::PaymentLayer;
-//! use mpp::server::{Mpp, tempo, TempoConfig};
+//! use mpp::server::{Mpp, movement, MovementConfig};
 //!
-//! let mpp = Mpp::create(tempo(TempoConfig {
+//! let mpp = Mpp::create_movement(movement(MovementConfig {
 //!     recipient: "0xabc...",
 //! })).unwrap();
 //!

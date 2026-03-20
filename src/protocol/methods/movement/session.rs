@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MovementSessionMethodDetails {
-    /// Module address where TempoStreamChannel is deployed.
+    /// Module address where MovementStreamChannel is deployed.
     pub module_address: String,
 
     /// Registry address (usually same as module address).
@@ -200,13 +200,13 @@ mod tests {
             unit_type: Some("request".to_string()),
             currency: "0xa".to_string(),
             recipient: Some(
-                "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58"
+                "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8"
                     .to_string(),
             ),
             suggested_deposit: Some("1000000".to_string()),
             method_details: Some(serde_json::json!({
-                "moduleAddress": "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58",
-                "registryAddress": "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58",
+                "moduleAddress": "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8",
+                "registryAddress": "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8",
                 "tokenMetadata": "0xa",
                 "channelId": "0xabc123",
                 "minVoucherDelta": "10000",

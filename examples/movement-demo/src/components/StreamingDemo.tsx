@@ -304,7 +304,7 @@ export function StreamingDemo() {
     <>
       <header>
         <h1>
-          <span>Tempo</span> Stream <span>Movement</span> Demo
+          <span>Movement</span> Stream Demo
         </h1>
         {connected && account ? (
           <div

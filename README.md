@@ -4,7 +4,7 @@ Rust SDK for the [**Machine Payments Protocol (MPP)**](https://mpp.dev) on [Move
 
 Lets any client — agents, apps, or humans — pay for any service in the same HTTP request using [HTTP 402 (Payment Required)](https://mpp.dev/protocol/http-402). Supports one-time charges, streaming payments via payment channels, and any Fungible Asset token (MOVE, USDC.e, USDCx, etc.).
 
-Built on the [TempoStreamChannel](https://github.com/andygolay/tempo-move) Move contract for on-chain payment channel settlement.
+Built on the [MovementStreamChannel](https://github.com/andygolay/tempo-move) Move contract for on-chain payment channel settlement.
 
 ## Install
 
@@ -81,7 +81,7 @@ println!("Total spent: {} base units", session.cumulative());
 ```rust
 use mpp::protocol::methods::movement::voucher;
 
-// Sign a voucher (off-chain, matches on-chain TempoStreamChannel contract)
+// Sign a voucher (off-chain, matches on-chain MovementStreamChannel contract)
 let sig = voucher::sign_voucher(&signing_key, &channel_id, cumulative_amount);
 
 // Verify (server-side)
@@ -148,10 +148,10 @@ Open http://localhost:5173. Supports MOVE, USDCx, and USDC.e — configure via `
 
 ## On-Chain Contract
 
-Settles on the [TempoStreamChannel Move contract](https://github.com/andygolay/tempo-move) deployed on Movement testnet:
+Settles on the [MovementStreamChannel Move contract](https://github.com/andygolay/tempo-move) deployed on Movement testnet:
 
 ```
-Module: 0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58
+Module: 0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8
 ```
 
 Entry functions: `open`, `settle`, `top_up`, `close`, `request_close`, `withdraw`

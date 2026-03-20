@@ -530,7 +530,7 @@ pub struct ChallengeEcho {
 ///
 /// Contains the signed transaction or transaction hash.
 ///
-/// Per IETF spec (Tempo §5.1-5.2):
+/// Per IETF spec (MPP §5.1-5.2):
 /// - `type="transaction"` uses field `signature` containing the signed transaction
 /// - `type="hash"` uses field `hash` containing the transaction hash
 #[derive(Debug, Clone)]

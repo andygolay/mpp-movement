@@ -1,7 +1,7 @@
 //! Voucher signing and channel ID computation for Movement session payments.
 //!
 //! Movement uses ed25519 signatures over BCS-serialized vouchers, matching
-//! the on-chain TempoStreamChannel Move contract.
+//! the on-chain MovementStreamChannel Move contract.
 
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey, Signature, Verifier};
 use sha3::{Digest, Sha3_256};

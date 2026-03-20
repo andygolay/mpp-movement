@@ -118,7 +118,7 @@ impl MovementProvider {
     ///
     /// # Arguments
     ///
-    /// * `module_address` - Address where TempoStreamChannel is deployed
+    /// * `module_address` - Address where MovementStreamChannel is deployed
     /// * `registry_address` - Registry address (usually same as module)
     /// * `payee` - Recipient/server address
     /// * `token_metadata` - FA metadata address (e.g., `"0xa"` for MOVE)

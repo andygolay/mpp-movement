@@ -54,7 +54,7 @@ impl ChargeConfig for FortuneFee {
 #[tokio::main]
 async fn main() {
     let recipient = std::env::var("RECIPIENT").unwrap_or_else(|_| {
-        "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58".to_string()
+        "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8".to_string()
     });
 
     // Create the MPP handler with the Movement builder.

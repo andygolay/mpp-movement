@@ -77,8 +77,8 @@ pub trait SessionMethod: Clone + Send + Sync {
     /// Return method-specific details to populate in session challenges.
     ///
     /// The default implementation returns `None`. Implementations like
-    /// Tempo's `SessionMethod` override this to provide `escrowContract`,
-    /// `chainId`, `minVoucherDelta`, etc.
+    /// Movement's `SessionMethod` override this to provide `moduleAddress`,
+    /// `registryAddress`, `tokenMetadata`, `minVoucherDelta`, etc.
     fn challenge_method_details(&self) -> Option<serde_json::Value> {
         None
     }

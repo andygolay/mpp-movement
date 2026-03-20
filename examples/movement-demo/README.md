@@ -6,7 +6,7 @@ React frontend for the [MPP pay-per-token SSE server](../movement/src/sse_server
 
 1. User connects a Movement-compatible wallet (Nightly, Razor, etc.)
 2. Clicks **Start Streaming** — frontend requests `/api/chat`, gets HTTP 402
-3. Frontend opens a TempoStreamChannel on-chain via wallet (user approves one tx)
+3. Frontend opens a MovementStreamChannel on-chain via wallet (user approves one tx)
 4. An ephemeral ed25519 session key signs vouchers — no wallet popup per token
 5. Tokens stream in via SSE; the server settles vouchers on-chain every 5 batches
 6. User clicks **Stop** — server closes the channel, refunds unused deposit
@@ -63,7 +63,7 @@ Copy `.env.example` to `.env` and adjust as needed. The frontend defaults to USD
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VITE_SERVER_URL` | `http://localhost:3001` | SSE server URL |
-| `VITE_MODULE_ADDRESS` | `0x3e9edf...` | TempoStreamChannel module address |
+| `VITE_MODULE_ADDRESS` | `0x74f106...` | MovementStreamChannel module address |
 | `VITE_REGISTRY_ADDR` | same as module | Channel registry address |
 | `VITE_TOKEN_METADATA_ADDR` | `0x63f169...` (USDCx) | FA metadata address |
 | `VITE_TOKEN_SYMBOL` | `USDCx` | Display symbol |

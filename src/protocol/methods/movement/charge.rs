@@ -88,14 +88,14 @@ mod tests {
             amount: "1000000".to_string(),
             currency: "0xa".to_string(),
             recipient: Some(
-                "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58"
+                "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8"
                     .to_string(),
             ),
             description: None,
             external_id: None,
             method_details: Some(serde_json::json!({
                 "network": "testnet",
-                "moduleAddress": "0x3e9edf3be513781a6db0706b652da425ad67f58b5cb366847126bf0fb716fc58"
+                "moduleAddress": "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8"
             })),
             ..Default::default()
         }
