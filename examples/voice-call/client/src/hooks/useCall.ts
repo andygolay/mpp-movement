@@ -97,6 +97,11 @@ export function useCall(): CallResult {
         return;
       }
 
+      if (account.address.toString().toLowerCase() === hostAddress.toLowerCase()) {
+        setError("Can't call yourself — use a different wallet for the caller");
+        return;
+      }
+
       setError("");
       setDuration(0);
       setTotalPaid(0n);
@@ -199,6 +204,25 @@ export function useCall(): CallResult {
           setRemoteStream(stream);
         });
         peerConnectionRef.current = pc;
+
+        // Expose for debugging: check audio stats via browser console with
+        //   checkAudio()
+        (window as any).__voiceCallPC = pc;
+        (window as any).checkAudio = async () => {
+          const stats = await pc.getStats();
+          stats.forEach((report: any) => {
+            if (report.type === "inbound-rtp" && report.kind === "audio") {
+              console.log(
+                `[audio] bytes received: ${report.bytesReceived}, packets: ${report.packetsReceived}, lost: ${report.packetsLost}`
+              );
+            }
+            if (report.type === "outbound-rtp" && report.kind === "audio") {
+              console.log(
+                `[audio] bytes sent: ${report.bytesSent}, packets: ${report.packetsSent}`
+              );
+            }
+          });
+        };
 
         // Create data channel for sending vouchers peer-to-peer
         const dataChannel = pc.createDataChannel("vouchers");

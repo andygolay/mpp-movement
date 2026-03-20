@@ -18,3 +18,9 @@ export const TOKEN_SYMBOL =
 export const TOKEN_DECIMALS = Number(
   import.meta.env.VITE_TOKEN_DECIMALS ?? "8",
 );
+
+// TURN server config for WebRTC across different networks.
+// Set these env vars to enable relay (required when peers aren't on the same LAN).
+export const TURN_URL = import.meta.env.VITE_TURN_URL ?? "";
+export const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME ?? "";
+export const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL ?? "";

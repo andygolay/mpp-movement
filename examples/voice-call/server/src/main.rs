@@ -28,10 +28,12 @@ use axum::{
     Json, Router,
 };
 use dashmap::DashMap;
+use ed25519_dalek::{Signature, VerifyingKey};
 use futures::{SinkExt, StreamExt};
 use mpp::format_www_authenticate;
 use mpp::server::{movement as movement_builder, MovementConfig, MovementSessionOptions, Mpp};
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::broadcast;
@@ -59,7 +61,13 @@ struct HostInfo {
     busy: bool,
     #[serde(default)]
     name: Option<String>,
+    /// Last time the host polled (used for staleness detection). Not serialized to clients.
+    #[serde(skip)]
+    last_seen: Option<Instant>,
 }
+
+/// Hosts that haven't polled in this long are considered stale and removed from listings.
+const HOST_STALE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 struct ActiveCall {
     host_addr: String,
@@ -95,6 +103,14 @@ struct GoLiveRequest {
     rate_per_second: String,
     currency: String,
     name: Option<String>,
+    /// Ed25519 signature proving wallet ownership (hex-encoded).
+    signature: String,
+    /// The full message that was signed (wallet-prefixed).
+    full_message: String,
+    /// Nonce (timestamp) to prevent replay.
+    nonce: String,
+    /// Ed25519 public key (hex-encoded, 0x-prefixed).
+    pubkey: String,
 }
 
 #[derive(Deserialize)]
@@ -187,6 +203,139 @@ async fn main() {
 }
 
 // ---------------------------------------------------------------------------
+// Signature verification
+// ---------------------------------------------------------------------------
+
+/// Verify that:
+///  1. The ed25519 signature is valid over the full message.
+///  2. The public key derives to the claimed address.
+///  3. The full message contains the expected address and a recent nonce.
+///
+/// The wallet returns BCS-serialized `AnyPublicKey` and `AnySignature` from `toString()`.
+/// For ed25519, these are prefixed with a ULEB128 variant byte (0x00).
+/// Address derivation depends on account type:
+///  - Legacy: sha3_256(raw_pubkey || 0x00)
+///  - SingleKey: sha3_256(0x00 || raw_pubkey || 0x02)
+fn verify_go_live_signature(
+    address: &str,
+    full_message: &str,
+    nonce: &str,
+    signature_hex: &str,
+    pubkey_hex: &str,
+) -> Result<(), String> {
+    // Check the nonce is a recent timestamp (within 5 minutes).
+    let nonce_ts: u64 = nonce
+        .parse()
+        .map_err(|_| "Invalid nonce (expected timestamp)".to_string())?;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    if now_ms.abs_diff(nonce_ts) > 5 * 60 * 1000 {
+        return Err("Nonce expired (must be within 5 minutes)".to_string());
+    }
+
+    // Check the full message contains the address and nonce.
+    let addr_lower = address.to_lowercase();
+    let msg_lower = full_message.to_lowercase();
+    if !msg_lower.contains(&addr_lower) {
+        return Err("Full message does not contain the claimed address".to_string());
+    }
+    if !full_message.contains(nonce) {
+        return Err("Full message does not contain the nonce".to_string());
+    }
+
+    // Decode the public key bytes (strip 0x prefix).
+    let pubkey_clean = pubkey_hex.strip_prefix("0x").unwrap_or(pubkey_hex);
+    println!(
+        "  pubkey hex: 0x{} ({} hex chars = {} bytes)",
+        pubkey_clean,
+        pubkey_clean.len(),
+        pubkey_clean.len() / 2
+    );
+    let pubkey_bytes =
+        hex::decode(pubkey_clean).map_err(|e| format!("Invalid pubkey hex: {e}"))?;
+
+    // Extract the raw 32-byte ed25519 key.
+    // Wallet may send raw 32 bytes, or BCS-wrapped AnyPublicKey (0x00 prefix + 32 bytes).
+    let raw_pubkey: [u8; 32] = if pubkey_bytes.len() == 32 {
+        pubkey_bytes
+            .try_into()
+            .map_err(|_| "Public key length mismatch".to_string())?
+    } else if pubkey_bytes.len() == 33 && pubkey_bytes[0] == 0x00 {
+        // AnyPublicKey BCS: variant 0x00 (ed25519) + 32 bytes
+        pubkey_bytes[1..]
+            .try_into()
+            .map_err(|_| "Public key length mismatch".to_string())?
+    } else {
+        return Err(format!(
+            "Unexpected public key length: {} bytes (expected 32 or 33)",
+            pubkey_bytes.len()
+        ));
+    };
+
+    let verifying_key = VerifyingKey::from_bytes(&raw_pubkey)
+        .map_err(|e| format!("Invalid public key: {e}"))?;
+
+    // Derive the address and check it matches.
+    // Try both SingleKey and Legacy derivation schemes.
+    let normalize_addr = |a: &str| -> String {
+        let clean = a.strip_prefix("0x").unwrap_or(a).to_lowercase();
+        format!("0x{:0>64}", clean)
+    };
+    let claimed = normalize_addr(address);
+
+    // SingleKey scheme: sha3_256(0x00 || raw_pubkey || 0x02)
+    let mut hasher = Sha3_256::new();
+    hasher.update([0x00]); // ed25519 variant
+    hasher.update(&raw_pubkey);
+    hasher.update([0x02]); // SingleKey scheme suffix
+    let single_key_addr = format!("0x{}", hex::encode(hasher.finalize()));
+
+    // Legacy scheme: sha3_256(raw_pubkey || 0x00)
+    let mut hasher = Sha3_256::new();
+    hasher.update(&raw_pubkey);
+    hasher.update([0x00]); // Legacy ed25519 scheme suffix
+    let legacy_addr = format!("0x{}", hex::encode(hasher.finalize()));
+
+    println!("  claimed addr:     {}", claimed);
+    println!("  single_key addr:  {}", normalize_addr(&single_key_addr));
+    println!("  legacy addr:      {}", normalize_addr(&legacy_addr));
+
+    if normalize_addr(&single_key_addr) != claimed && normalize_addr(&legacy_addr) != claimed {
+        return Err("Public key does not match the claimed address".to_string());
+    }
+
+    // Decode the signature (strip 0x prefix).
+    // May be raw 64 bytes or BCS-wrapped AnySignature (0x00 prefix + 64 bytes).
+    let sig_clean = signature_hex.strip_prefix("0x").unwrap_or(signature_hex);
+    println!(
+        "  sig hex: 0x{}... ({} bytes)",
+        &sig_clean[..std::cmp::min(16, sig_clean.len())],
+        sig_clean.len() / 2
+    );
+    let sig_bytes = hex::decode(sig_clean).map_err(|e| format!("Invalid signature hex: {e}"))?;
+
+    let raw_sig = if sig_bytes.len() == 64 {
+        &sig_bytes[..]
+    } else if sig_bytes.len() == 65 && sig_bytes[0] == 0x00 {
+        &sig_bytes[1..]
+    } else {
+        return Err(format!(
+            "Unexpected signature length: {} bytes (expected 64 or 65)",
+            sig_bytes.len()
+        ));
+    };
+
+    let signature =
+        Signature::from_slice(raw_sig).map_err(|e| format!("Invalid signature: {e}"))?;
+
+    verifying_key
+        .verify_strict(full_message.as_bytes(), &signature)
+        .map_err(|_| "Signature verification failed".to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -195,6 +344,22 @@ async fn go_live(
     State(state): State<Arc<AppState>>,
     Json(body): Json<GoLiveRequest>,
 ) -> impl IntoResponse {
+    // Verify the wallet signature before accepting registration.
+    if let Err(e) = verify_go_live_signature(
+        &body.address,
+        &body.full_message,
+        &body.nonce,
+        &body.signature,
+        &body.pubkey,
+    ) {
+        println!("Host go-live rejected for {}: {}", body.address, e);
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response();
+    }
+
     let info = HostInfo {
         address: body.address.clone(),
         rate_per_second: body.rate_per_second,
@@ -202,10 +367,11 @@ async fn go_live(
         online: true,
         busy: false,
         name: body.name,
+        last_seen: Some(Instant::now()),
     };
     state.hosts.insert(body.address.clone(), info.clone());
-    println!("Host go-live: {}", body.address);
-    (StatusCode::OK, Json(serde_json::json!(info)))
+    println!("Host go-live (verified): {}", body.address);
+    (StatusCode::OK, Json(serde_json::json!(info))).into_response()
 }
 
 /// DELETE /api/host/go-live
@@ -222,10 +388,17 @@ async fn go_offline(
 
 /// GET /api/hosts
 async fn list_hosts(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let now = Instant::now();
     let hosts: Vec<HostInfo> = state
         .hosts
         .iter()
-        .filter(|entry| entry.value().online)
+        .filter(|entry| {
+            let h = entry.value();
+            h.online
+                && h.last_seen
+                    .map(|t| now.duration_since(t) < HOST_STALE_TIMEOUT)
+                    .unwrap_or(false)
+        })
         .map(|entry| entry.value().clone())
         .collect();
     Json(serde_json::json!(hosts))
@@ -361,14 +534,38 @@ async fn host_poll(
         }
     };
 
-    // Find a call where this address is the host
+    // Update last_seen so the host doesn't go stale
+    if let Some(mut host) = state.hosts.get_mut(address) {
+        host.last_seen = Some(Instant::now());
+    }
+
+    // Find a call where this address is the host (ignore stale calls > 60s old
+    // with no WebSocket subscribers, meaning neither party connected).
+    let now = Instant::now();
+    let mut stale_calls = vec![];
     for entry in state.calls.iter() {
         if entry.value().host_addr == *address {
+            let age = now.duration_since(entry.value().started_at);
+            // If the call has active WebSocket subscribers, it's a real call.
+            // If it's old and nobody connected (receiver_count == 0), it's stale.
+            if age.as_secs() > 30 && entry.value().signal_tx.receiver_count() == 0 {
+                stale_calls.push(entry.key().clone());
+                continue;
+            }
             return Json(serde_json::json!({
                 "callId": entry.key(),
                 "callerAddress": entry.value().caller_addr,
             }))
             .into_response();
+        }
+    }
+    // Clean up stale calls
+    for call_id in stale_calls {
+        if let Some((_, call)) = state.calls.remove(&call_id) {
+            if let Some(mut host) = state.hosts.get_mut(&call.host_addr) {
+                host.busy = false;
+            }
+            println!("Cleaned up stale call: {}", call_id);
         }
     }
 

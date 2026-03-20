@@ -22,7 +22,9 @@ export function CallerPanel() {
   useEffect(() => {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
-      remoteAudioRef.current.play().catch(() => {});
+      remoteAudioRef.current.play().catch((e) => {
+        console.warn("[caller] audio autoplay blocked:", e.message);
+      });
     }
   }, [remoteStream]);
 

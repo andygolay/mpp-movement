@@ -1,6 +1,21 @@
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-];
+import { TURN_URL, TURN_USERNAME, TURN_CREDENTIAL } from "./constants";
+
+function getIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+
+  if (TURN_URL) {
+    servers.push({
+      urls: TURN_URL,
+      username: TURN_USERNAME,
+      credential: TURN_CREDENTIAL,
+    });
+  }
+
+  return servers;
+}
 
 /**
  * Create an RTCPeerConnection configured for audio-only calls.
@@ -9,7 +24,7 @@ const ICE_SERVERS: RTCIceServer[] = [
 export function createPeerConnection(
   onTrack: (stream: MediaStream) => void,
 ): RTCPeerConnection {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const pc = new RTCPeerConnection({ iceServers: getIceServers() });
 
   pc.ontrack = (event) => {
     if (event.streams[0]) {

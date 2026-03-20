@@ -24,13 +24,81 @@ A host goes live with a per-second rate. Callers open a payment channel via HTTP
 
 **Trustless design:** The server only handles signaling and the initial 402 challenge. Vouchers flow peer-to-peer from caller to host over a WebRTC data channel. The host verifies each voucher signature locally using `@mpp/client`. Settlement happens on-chain — only the host (payee) can call `channel::close`.
 
+### Call Flow
+
+```
+  Caller                          Server (:3002)                        Host
+    │                                  │                                  │
+    │  POST /api/host/go-live          │◄─────────────────────────────────┤
+    │                                  │  { address, ratePerSecond, ... } │
+    │                                  │─────────────────────────────────▶│
+    │                                  │  200 OK                          │
+    │                                  │                                  │
+    │  GET /api/hosts                  │                                  │
+    │─────────────────────────────────▶│                                  │
+    │◄─────────────────────────────────│                                  │
+    │  [ { address, rate, ... } ]      │                                  │
+    │                                  │                                  │
+    │  POST /api/call/start?host=0x..  │                                  │
+    │  (no channel_id)                 │                                  │
+    │─────────────────────────────────▶│                                  │
+    │◄─────────────────────────────────│                                  │
+    │  402 Payment Required            │                                  │
+    │  WWW-Authenticate: MPP session.. │                                  │
+    │                                  │                                  │
+    │  ┌──────────────────────┐        │                                  │
+    │  │ Parse 402 challenge  │        │                                  │
+    │  │ Open payment channel │        │                                  │
+    │  │ on-chain (1 wallet   │        │                                  │
+    │  │ tx, host = payee)    │        │                                  │
+    │  └──────────────────────┘        │                                  │
+    │                                  │                                  │
+    │  POST /api/call/start?host=0x..  │                                  │
+    │  { channelId: "0x..." }          │                                  │
+    │─────────────────────────────────▶│  (marks host busy)               │
+    │◄─────────────────────────────────│                                  │
+    │  200 { callId, wsUrl }           │                                  │
+    │                                  │                                  │
+    │                                  │  GET /api/host/poll?address=0x.. │
+    │                                  │◄─────────────────────────────────┤
+    │                                  │─────────────────────────────────▶│
+    │                                  │  { callId, callerAddress }       │
+    │                                  │                                  │
+    │  GET /ws/signal/{callId}         │       GET /ws/signal/{callId}    │
+    │  ══════════ WebSocket ══════════▶│◄══════════ WebSocket ════════════┤
+    │                                  │                                  │
+    │  ┌───────────────────────────────┼──────────────────────────────┐   │
+    │  │  Signaling relay (SDP + ICE)  │  Server relays messages      │   │
+    │  │  offer ──────────────────────▶│──────────────────────────▶   │   │
+    │  │       ◀──────────────────────│◀────────────────────────── answer│
+    │  │  ice  ──────────────────────▶│──────────────────────────▶   │   │
+    │  │       ◀──────────────────────│◀────────────────────────── ice │  │
+    │  └───────────────────────────────┼──────────────────────────────┘   │
+    │                                  │                                  │
+    │  ════════════ WebRTC P2P (direct, server not involved) ════════════ │
+    │  │  audio ◄──────────────────────────────────────────────▶ audio │  │
+    │  │  voucher (every 5s) ──────────────────────────────────▶       │  │
+    │  │                                          (verify signature)   │  │
+    │                                  │                                  │
+    │  POST /api/call/hangup           │                                  │
+    │─────────────────────────────────▶│  (marks host available)          │
+    │◄─────────────────────────────────│                                  │
+    │  200 { duration }                │                                  │
+    │                                  │                                  │
+    │                                  │  ┌───────────────────────────┐   │
+    │                                  │  │ Host calls channel::close │   │
+    │                                  │  │ on-chain with highest     │   │
+    │                                  │  │ voucher → settles MOVE    │   │
+    │                                  │  └───────────────────────────┘   │
+```
+
 ## Prerequisites
 
 - Rust toolchain
 - Node.js 18+ and pnpm
-- A Movement wallet (e.g., Razor, Nightly) with testnet MOVE
+- Two Movement wallets with testnet MOVE (e.g., Razor, Nightly — you need two different wallets to play both roles)
 
-## Running
+## Running Locally
 
 ### 1. Start the server
 
@@ -57,22 +125,49 @@ pnpm dev
 
 Opens at `http://localhost:5173`.
 
-### 3. Use it
+### 3. Test with two browser tabs
 
-**As the host:**
-1. Open the app and connect your wallet
+You can test the full flow on one computer using two tabs. You'll need two different wallet browser extensions (e.g., Razor in Chrome and Nightly in a Chrome profile, or use Chrome + Firefox).
+
+**Tab 1 — Host:**
+1. Open `http://localhost:5173` and connect your first wallet
 2. Switch to **Host** mode
-3. Enter your display name and rate (in MOVE per second)
-4. Click **Go Live**
+3. Enter a display name and rate (e.g., `0.001` MOVE per second)
+4. Click **Go Live** — your wallet will ask you to sign a message (this proves you own the address)
 
-**As a caller (open a second browser/tab with a different wallet):**
-1. Open the app and connect a different wallet
+**Tab 2 — Caller:**
+1. Open `http://localhost:5173` in a second tab and connect a different wallet
 2. Stay in **Caller** mode
 3. You'll see the host listed with their rate
-4. Click **Call** — your wallet will prompt to open a payment channel
-5. Once the channel is open and WebRTC connects, you're in a live voice call
-6. Vouchers are sent every 5 seconds directly to the host (peer-to-peer)
-7. Click **Hang Up** when done — the host's wallet will prompt to close the channel on-chain
+4. Click **Call** — your wallet will prompt to open a payment channel (one on-chain transaction)
+5. Once the channel is open, WebRTC connects and vouchers start flowing
+6. Click **Hang Up** when done — the host's tab will prompt to close the channel on-chain, settling payment
+
+### 4. Verify audio is working
+
+On the same computer, you won't actually hear audio between tabs — the browser's echo cancellation suppresses the loopback since both tabs share the same mic and speakers. This is normal.
+
+To confirm audio is actually flowing, open the browser console (F12) on either tab during a call and run:
+
+```js
+checkAudio()
+```
+
+You should see output like:
+
+```
+[audio] bytes sent: 48320, packets: 302
+[audio] bytes received: 47800, packets: 299, lost: 0
+```
+
+If `bytesReceived` is increasing each time you run it, audio is working — echo cancellation is just muting the playback. To hear actual audio, test with two separate devices on the same network.
+
+### 5. What to check during testing
+
+- **Payment flow**: The caller's wallet prompts to open a channel, the host's wallet prompts to close it on hangup
+- **Vouchers**: The host panel shows increasing earnings every 5 seconds
+- **Audio**: Run `checkAudio()` in the console to verify bytes are flowing
+- **Signaling**: Console logs show `[caller] sent offer`, `[host] received offer`, `[host] sending answer`
 
 ## Configuration
 
@@ -85,6 +180,48 @@ The client reads environment variables via Vite:
 | `VITE_TOKEN_METADATA_ADDR` | `0xa` | Token (native MOVE) |
 | `VITE_TOKEN_SYMBOL` | `MOVE` | Display symbol |
 | `VITE_TOKEN_DECIMALS` | `8` | Token decimals |
+| `VITE_TURN_URL` | _(none)_ | TURN server URL (e.g. `turn:your-server.com:3478`) |
+| `VITE_TURN_USERNAME` | _(none)_ | TURN server username |
+| `VITE_TURN_CREDENTIAL` | _(none)_ | TURN server password |
+
+## Deploying for Real Users
+
+For calls to work between users on different networks, you need a **TURN relay server**. STUN alone only handles simple NAT traversal — when peers are behind firewalls or symmetric NATs (most real-world networks), WebRTC needs a TURN server to relay the media.
+
+### TURN server setup
+
+You can use any TURN provider or self-host one. Set the credentials in `client/.env`:
+
+```env
+VITE_TURN_URL=turn:your-turn-server.com:3478
+VITE_TURN_USERNAME=your-username
+VITE_TURN_CREDENTIAL=your-password
+```
+
+To self-host, [coturn](https://github.com/coturn/coturn) is the standard open-source TURN server:
+
+```bash
+sudo apt install coturn
+```
+
+Minimal `/etc/turnserver.conf`:
+
+```
+listening-port=3478
+tls-listening-port=5349
+realm=your-domain.com
+user=myuser:mypassword
+lt-cred-mech
+fingerprint
+```
+
+### Production checklist
+
+- [ ] Deploy the Rust server with a public URL and TLS (WebRTC requires HTTPS in production)
+- [ ] Set `VITE_SERVER_URL` to your public server URL
+- [ ] Configure a TURN server (see above)
+- [ ] Set a strong `SECRET_KEY` on the server (not the default)
+- [ ] Serve the client over HTTPS (required for `getUserMedia` mic access)
 
 ## How Payment Works
 
