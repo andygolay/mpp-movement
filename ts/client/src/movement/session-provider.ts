@@ -53,6 +53,7 @@ interface ChannelEntry {
   channelId: Uint8Array;
   salt: Uint8Array;
   cumulativeAmount: bigint;
+  deposit: bigint;
   moduleAddress: string;
   opened: boolean;
 }
@@ -189,6 +190,7 @@ export class MovementSessionProvider implements PaymentProvider {
       channelId,
       salt,
       cumulativeAmount: 0n,
+      deposit,
       moduleAddress,
       opened: true,
     };
@@ -288,5 +290,52 @@ export class MovementSessionProvider implements PaymentProvider {
       cumulativeAmount: entry.cumulativeAmount,
       signature,
     };
+  }
+
+  /**
+   * Top up an existing channel with additional funds (on-chain transaction).
+   * Returns the new total deposit.
+   */
+  async topUp(
+    recipient: string,
+    currency: string,
+    additionalDeposit: bigint,
+    moduleAddress?: string,
+  ): Promise<{ deposit: bigint; txHash: string }> {
+    const account = this.wallet.account;
+    if (!account) throw new Error("Wallet not connected");
+
+    const mod = moduleAddress ?? this.options.moduleAddress;
+    const registryAddress = this.options.registryAddress!;
+    const key = `${recipient}:${currency}:${mod}`;
+    const entry = this.channels.get(key);
+    if (!entry) throw new Error("No open channel for this recipient/currency");
+
+    const txResponse = await this.wallet.signAndSubmitTransaction({
+      data: {
+        function: `${mod}::channel::top_up` as `${string}::${string}::${string}`,
+        functionArguments: [
+          registryAddress,
+          Array.from(entry.channelId),
+          Number(additionalDeposit),
+        ],
+      },
+    });
+
+    entry.deposit += additionalDeposit;
+
+    return {
+      deposit: entry.deposit,
+      txHash: txResponse.hash,
+    };
+  }
+
+  /**
+   * Get the current deposit for a channel.
+   */
+  getDeposit(recipient: string, currency: string, moduleAddress?: string): bigint {
+    const mod = moduleAddress ?? this.options.moduleAddress;
+    const key = `${recipient}:${currency}:${mod}`;
+    return this.channels.get(key)?.deposit ?? 0n;
   }
 }

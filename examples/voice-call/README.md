@@ -18,6 +18,7 @@ A host goes live with a per-second rate. Callers open a payment channel via HTTP
 │  - HTTP 402 challenges (channel opening)             │
 │  - WebSocket signaling relay (WebRTC setup)          │
 │  - Host/call state management                        │
+│  - Rate limiting + WebSocket auth                    │
 │  - Never touches funds or vouchers                   │
 └──────────────────────────────────────────────────────┘
 ```
@@ -57,14 +58,17 @@ A host goes live with a per-second rate. Callers open a payment channel via HTTP
     │  { channelId: "0x..." }          │                                  │
     │─────────────────────────────────▶│  (marks host busy)               │
     │◄─────────────────────────────────│                                  │
-    │  200 { callId, wsUrl }           │                                  │
+    │  200 { callId, wsUrl,            │                                  │
+    │        callerToken, hostToken }  │                                  │
     │                                  │                                  │
     │                                  │  GET /api/host/poll?address=0x.. │
     │                                  │◄─────────────────────────────────┤
     │                                  │─────────────────────────────────▶│
-    │                                  │  { callId, callerAddress }       │
+    │                                  │  { callId, callerAddress,        │
+    │                                  │    wsToken }                     │
     │                                  │                                  │
     │  GET /ws/signal/{callId}         │       GET /ws/signal/{callId}    │
+    │  ?address=...&token=...          │       ?address=...&token=...     │
     │  ══════════ WebSocket ══════════▶│◄══════════ WebSocket ════════════┤
     │                                  │                                  │
     │  ┌───────────────────────────────┼──────────────────────────────┐   │
@@ -79,6 +83,13 @@ A host goes live with a per-second rate. Callers open a payment channel via HTTP
     │  │  audio ◄──────────────────────────────────────────────▶ audio │  │
     │  │  voucher (every 5s) ──────────────────────────────────▶       │  │
     │  │                                          (verify signature)   │  │
+    │                                  │                                  │
+    │  ┌──────────────────────┐        │                                  │
+    │  │ Running low on time? │        │                                  │
+    │  │ Click "+5 min" to    │        │                                  │
+    │  │ top up the channel   │        │                                  │
+    │  │ on-chain             │        │                                  │
+    │  └──────────────────────┘        │                                  │
     │                                  │                                  │
     │  POST /api/call/hangup           │                                  │
     │─────────────────────────────────▶│  (marks host available)          │
@@ -104,16 +115,13 @@ A host goes live with a per-second rate. Callers open a payment channel via HTTP
 
 ```bash
 cd server
+cp .env.example .env
+# Edit .env — set SECRET_KEY (required). For local dev, generate one with:
+#   openssl rand -base64 32
 cargo run
 ```
 
-The server starts on `http://localhost:3002`. Optional environment variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `SECRET_KEY` | `voice-call-demo-secret` | MPP server secret for challenge HMAC |
-| `MODULE_ADDRESS` | `0x74f1060...b1e8` | MovementStreamChannel module address |
-| `REST_URL` | `https://testnet.movementnetwork.xyz/v1` | Movement REST API |
+The server starts on `http://localhost:3002`.
 
 ### 2. Start the client
 
@@ -141,37 +149,35 @@ You can test the full flow on one computer using two tabs. You'll need two diffe
 3. You'll see the host listed with their rate
 4. Click **Call** — your wallet will prompt to open a payment channel (one on-chain transaction)
 5. Once the channel is open, WebRTC connects and vouchers start flowing
-6. Click **Hang Up** when done — the host's tab will prompt to close the channel on-chain, settling payment
+6. The caller sees **remaining time** — click **+5 min** to add more time if needed
+7. Click **Hang Up** when done — the host's tab will prompt to close the channel on-chain, settling payment
 
-### 4. Verify audio is working
-
-On the same computer, you won't actually hear audio between tabs — the browser's echo cancellation suppresses the loopback since both tabs share the same mic and speakers. This is normal.
-
-To confirm audio is actually flowing, open the browser console (F12) on either tab during a call and run:
-
-```js
-checkAudio()
-```
-
-You should see output like:
-
-```
-[audio] bytes sent: 48320, packets: 302
-[audio] bytes received: 47800, packets: 299, lost: 0
-```
-
-If `bytesReceived` is increasing each time you run it, audio is working — echo cancellation is just muting the playback. To hear actual audio, test with two separate devices on the same network.
-
-### 5. What to check during testing
+### 4. What to check during testing
 
 - **Payment flow**: The caller's wallet prompts to open a channel, the host's wallet prompts to close it on hangup
 - **Vouchers**: The host panel shows increasing earnings every 5 seconds
-- **Audio**: Run `checkAudio()` in the console to verify bytes are flowing
+- **Remaining time**: The caller sees a countdown; it turns yellow at 60s and red at 30s
+- **Add time**: The "+5 min" button tops up the payment channel on-chain mid-call
 - **Signaling**: Console logs show `[caller] sent offer`, `[host] received offer`, `[host] sending answer`
 
 ## Configuration
 
-The client reads environment variables via Vite:
+### Server environment variables
+
+See `server/.env.example` for the full list.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SECRET_KEY` | **Yes** | _(none)_ | HMAC secret for payment challenges and WebSocket auth. Generate with `openssl rand -base64 32` |
+| `MODULE_ADDRESS` | No | `0x74f1060...b1e8` | MovementStreamChannel module address |
+| `REST_URL` | No | `https://testnet.movementnetwork.xyz/v1` | Movement REST API |
+| `ALLOWED_ORIGINS` | No | _(all origins)_ | Comma-separated CORS origins (e.g. `https://your-app.vercel.app`) |
+| `RUST_LOG` | No | `info` | Log level filter (e.g. `debug`, `warn`, `voice_call_server=debug`) |
+| `LOG_FORMAT` | No | _(human-readable)_ | Set to `json` for structured JSON logs |
+
+### Client environment variables
+
+See `client/.env.example` for the full list.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -184,56 +190,82 @@ The client reads environment variables via Vite:
 | `VITE_TURN_USERNAME` | _(none)_ | TURN server username |
 | `VITE_TURN_CREDENTIAL` | _(none)_ | TURN server password |
 
-## Deploying for Real Users
+## Production Deployment
 
-For calls to work between users on different networks, you need a **TURN relay server**. STUN alone only handles simple NAT traversal — when peers are behind firewalls or symmetric NATs (most real-world networks), WebRTC needs a TURN server to relay the media.
-
-### TURN server setup
-
-You can use any TURN provider or self-host one. Set the credentials in `client/.env`:
-
-```env
-VITE_TURN_URL=turn:your-turn-server.com:3478
-VITE_TURN_USERNAME=your-username
-VITE_TURN_CREDENTIAL=your-password
-```
-
-To self-host, [coturn](https://github.com/coturn/coturn) is the standard open-source TURN server:
-
-```bash
-sudo apt install coturn
-```
-
-Minimal `/etc/turnserver.conf`:
-
-```
-listening-port=3478
-tls-listening-port=5349
-realm=your-domain.com
-user=myuser:mypassword
-lt-cred-mech
-fingerprint
-```
+See [DEPLOY.md](./DEPLOY.md) for a step-by-step guide.
 
 ### Production checklist
 
-- [ ] Deploy the Rust server with a public URL and TLS (WebRTC requires HTTPS in production)
+- [ ] Set a strong `SECRET_KEY` (generate with `openssl rand -base64 32`)
+- [ ] Set `ALLOWED_ORIGINS` to your client domain(s)
+- [ ] Set `LOG_FORMAT=json` and `RUST_LOG=info` for production logging
+- [ ] Point `MODULE_ADDRESS` and `REST_URL` at mainnet (if deploying to mainnet)
+- [ ] Deploy the Rust server with TLS (Caddy reverse proxy recommended)
 - [ ] Set `VITE_SERVER_URL` to your public server URL
-- [ ] Configure a TURN server (see above)
-- [ ] Set a strong `SECRET_KEY` on the server (not the default)
+- [ ] Configure a TURN server for cross-network calls
 - [ ] Serve the client over HTTPS (required for `getUserMedia` mic access)
+- [ ] Set up monitoring on `GET /health` (returns `{"status":"ok"}`)
+
+## Operations
+
+### Health check
+
+```
+GET /health → {"status":"ok"}
+```
+
+Use this for load balancer health checks, uptime monitoring, and alerting.
+
+### Logging
+
+The server uses structured logging via the `tracing` crate.
+
+- **Human-readable** (default): good for development and manual debugging
+- **JSON** (`LOG_FORMAT=json`): good for production log aggregation (ELK, CloudWatch, Datadog, etc.)
+
+Control verbosity with `RUST_LOG`:
+```bash
+RUST_LOG=info          # default — call lifecycle events
+RUST_LOG=debug         # verbose — includes all request details
+RUST_LOG=warn          # quiet — only warnings and errors
+```
+
+### Graceful shutdown
+
+The server handles `SIGTERM` and `SIGINT` (Ctrl+C) gracefully:
+- In-flight HTTP requests complete before the process exits
+- All active calls are cleaned up
+- All hosts are marked offline
+
+This means `systemctl restart voice-call-server` won't leave ghost state.
+
+### Background cleanup
+
+A background task runs every 60 seconds to:
+- Remove calls older than 5 minutes with no active WebSocket connections
+- Mark hosts as offline if they haven't polled in 2 minutes
+- Clean up expired rate limit entries
+
+### Rate limiting
+
+All API endpoints are rate-limited to **60 requests per IP per minute**. Exceeding the limit returns `429 Too Many Requests`.
+
+### WebSocket authentication
+
+WebSocket connections require an HMAC token. Tokens are generated by the server and returned in the `start_call` response (for the caller) and `host_poll` response (for the host). This prevents third parties from connecting to a call's signaling channel.
 
 ## How Payment Works
 
 1. Caller hits `POST /api/call/start` → server returns **HTTP 402** with an MPP session challenge (host's address is the payee)
 2. Caller's browser parses the challenge using `@mpp/client`
 3. `MovementSessionProvider` opens a payment channel on-chain with the host as payee (user approves 1 wallet tx)
-4. Caller retries with `Authorization: Payment <credential>` → server returns `callId`
-5. Both parties connect via WebSocket for WebRTC signaling (SDP offer/answer + ICE candidates)
+4. Caller retries with `Authorization: Payment <credential>` → server returns `callId` + WebSocket auth tokens
+5. Both parties connect via authenticated WebSocket for WebRTC signaling (SDP offer/answer + ICE candidates)
 6. WebRTC establishes peer-to-peer audio + a `"vouchers"` data channel
 7. Every 5 seconds, the caller signs an ed25519 voucher and sends it to the host over the data channel (off-chain, no gas, no server involvement)
 8. The host verifies each voucher signature locally using `verifyVoucher` from `@mpp/client` and tracks the highest
-9. On hangup, the host calls `channel::close` on-chain with the highest voucher — settling the earned MOVE to the host and refunding unused deposit to the caller
+9. If the caller is running low on time, they can top up the payment channel on-chain ("+5 min" button)
+10. On hangup, the host calls `channel::close` on-chain with the highest voucher — settling the earned MOVE to the host and refunding unused deposit to the caller
 
 ## Security
 
@@ -243,8 +275,12 @@ fingerprint
 - **Host is incentivized to close** — that's how they get paid
 - **Caller can stop anytime** — just stops sending vouchers and hangs up
 - **Fallback** — if the host never closes, the caller can `request_close` on-chain after a 15-minute grace period
+- **WebSocket auth** — HMAC tokens prevent third parties from intercepting or injecting signaling messages
+- **Rate limiting** — per-IP rate limits prevent spam and DoS
+- **Input validation** — all API inputs are validated (address format, rate, name length)
+- **No sensitive data in logs** — addresses, keys, and signatures are never logged
 
 ## Stack
 
-- **Server:** Rust + axum + `mpp` crate (402 challenges) + WebSocket (signaling)
-- **Client:** React + `@mpp/client` (payment flow + voucher verification) + `@moveindustries/wallet-adapter-react` (wallet) + WebRTC (audio + data channel)
+- **Server:** Rust + axum + `mpp` crate (402 challenges) + WebSocket (signaling) + tracing (structured logging)
+- **Client:** React + `@mpp/client` (payment flow + voucher verification + channel top-up) + `@moveindustries/wallet-adapter-react` (wallet) + WebRTC (audio + data channel)

@@ -205,13 +205,23 @@ Build (this takes a few minutes on a small VPS):
 cargo build --release --bin voice-call-server
 ```
 
-Create a production env file:
+Create the production env file:
 
 ```bash
 cat > /home/deploy/mpp-movement/.env.production << 'EOF'
-SECRET_KEY=CHANGE_THIS_TO_A_RANDOM_SECRET
+# Required
+SECRET_KEY=CHANGE_THIS
+
+# On-chain config (update for mainnet)
 MODULE_ADDRESS=0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8
 REST_URL=https://testnet.movementnetwork.xyz/v1
+
+# Security — restrict to your client domain(s)
+ALLOWED_ORIGINS=https://your-app.vercel.app
+
+# Logging
+RUST_LOG=info
+LOG_FORMAT=json
 EOF
 ```
 
@@ -219,7 +229,13 @@ Generate and set the secret:
 
 ```bash
 SECRET=$(openssl rand -base64 32)
-sed -i "s|CHANGE_THIS_TO_A_RANDOM_SECRET|$SECRET|" /home/deploy/mpp-movement/.env.production
+sed -i "s|CHANGE_THIS|$SECRET|" /home/deploy/mpp-movement/.env.production
+```
+
+**Edit the file** to set your actual `ALLOWED_ORIGINS` (your Vercel domain):
+
+```bash
+nano /home/deploy/mpp-movement/.env.production
 ```
 
 Create a systemd service so it runs automatically:
@@ -238,6 +254,10 @@ EnvironmentFile=/home/deploy/mpp-movement/.env.production
 ExecStart=/home/deploy/mpp-movement/target/release/voice-call-server
 Restart=always
 RestartSec=5
+
+# Graceful shutdown — the server handles SIGTERM
+KillSignal=SIGTERM
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
@@ -258,6 +278,11 @@ Verify it's running:
 sudo systemctl status voice-call-server
 # Should say "active (running)"
 
+# Health check
+curl http://localhost:3002/health
+# Should return: {"status":"ok"}
+
+# Hosts list
 curl http://localhost:3002/api/hosts
 # Should return: []
 ```
@@ -293,8 +318,8 @@ sudo systemctl restart caddy
 Test it (may take 30 seconds for the TLS cert):
 
 ```bash
-curl https://api.yourdomain.com/api/hosts
-# Should return: []
+curl https://api.yourdomain.com/health
+# Should return: {"status":"ok"}
 ```
 
 If that works, your server is live with HTTPS. Caddy handles WebSocket proxying automatically.
@@ -309,7 +334,7 @@ If that works, your server is live with HTTPS. Caddy handles WebSocket proxying 
 |---------|-------|
 | **Framework Preset** | Vite |
 | **Root Directory** | `.` (leave as repo root) |
-| **Build Command** | `cd ts/client && npm install && npm run build && cd ../../examples/voice-call/client && npm install && npm run build` |
+| **Build Command** | `cd ts/client && pnpm install && pnpm build && cd ../../examples/voice-call/client && pnpm install && pnpm build` |
 | **Output Directory** | `examples/voice-call/client/dist` |
 
 4. Add environment variables:
@@ -325,6 +350,60 @@ If that works, your server is live with HTTPS. Caddy handles WebSocket proxying 
 5. Click **Deploy**
 
 Once deployed, Vercel gives you a URL like `your-project.vercel.app`. That's your live app.
+
+**Important:** Go back to your server's `.env.production` and set `ALLOWED_ORIGINS` to your Vercel URL, then restart the server:
+
+```bash
+# Edit .env.production to set ALLOWED_ORIGINS=https://your-project.vercel.app
+nano /home/deploy/mpp-movement/.env.production
+sudo systemctl restart voice-call-server
+```
+
+## Operations
+
+### Monitoring
+
+Set up uptime monitoring on the health endpoint:
+
+```
+GET https://api.yourdomain.com/health → {"status":"ok"}
+```
+
+Any uptime service (UptimeRobot, Pingdom, etc.) can poll this every 30-60 seconds and alert on failure.
+
+### Viewing logs
+
+The server outputs structured JSON logs (when `LOG_FORMAT=json`).
+
+```bash
+# Recent logs
+sudo journalctl -u voice-call-server -n 100
+
+# Follow live
+sudo journalctl -u voice-call-server -f
+
+# Filter by time
+sudo journalctl -u voice-call-server --since "1 hour ago"
+```
+
+For log aggregation, you can pipe journald to your preferred service (Datadog, CloudWatch, etc.) or use `vector`/`filebeat`.
+
+### Restarting
+
+The server handles `SIGTERM` gracefully — in-flight requests complete, active calls are cleaned up, and hosts are marked offline before exit.
+
+```bash
+sudo systemctl restart voice-call-server
+```
+
+Hosts will automatically re-register when they next poll (within 2 seconds). Callers in active calls will see the WebSocket disconnect and the call will end cleanly.
+
+### Scaling considerations
+
+The current architecture is a single-process, in-memory server. This is fine for moderate traffic (hundreds of concurrent calls). If you need more:
+
+- **Horizontal scaling**: Requires shared state (Redis or a database) for hosts/calls. The signaling relay needs sticky sessions or a shared pub/sub system.
+- **TURN scaling**: coturn can be clustered or replaced with a cloud TURN provider (Twilio, Xirsys).
 
 ## Updating the Server
 
@@ -356,6 +435,8 @@ Make sure the firewall allows UDP 49152-65535.
 sudo journalctl -u voice-call-server -n 50
 ```
 
+**Server returns 429**: Rate limit exceeded. The default is 60 requests per IP per minute. If a legitimate client is hitting this, check for polling loops or misconfigured retry logic.
+
 **Caddy can't get a TLS certificate**: DNS isn't pointing to your VPS yet. Check:
 ```bash
 dig api.yourdomain.com
@@ -371,3 +452,5 @@ cargo install cross
 cross build --release --target x86_64-unknown-linux-gnu --bin voice-call-server
 scp target/x86_64-unknown-linux-gnu/release/voice-call-server deploy@YOUR_VPS_IP:/home/deploy/mpp-movement/target/release/
 ```
+
+**Server panics on startup with "SECRET_KEY environment variable is required"**: You need to set `SECRET_KEY` in your `.env` or `.env.production` file. Generate one with `openssl rand -base64 32`.

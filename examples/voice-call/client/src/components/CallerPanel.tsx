@@ -11,9 +11,12 @@ export function CallerPanel() {
     callState,
     duration,
     totalPaid,
+    deposit,
+    remainingSeconds,
     error: callError,
     remoteStream,
     startCall,
+    addTime,
     hangup,
   } = useCall();
 
@@ -115,17 +118,61 @@ export function CallerPanel() {
               </div>
             </div>
             <div className="status-item">
-              <label>Duration</label>
-              <div className="value blue">{formatDuration(duration)}</div>
+              <label>Remaining</label>
+              <div
+                className="value"
+                style={{
+                  color:
+                    remainingSeconds <= 30
+                      ? "var(--red, #ff4444)"
+                      : remainingSeconds <= 60
+                        ? "var(--yellow, #ffaa00)"
+                        : "var(--blue, #4488ff)",
+                }}
+              >
+                {formatDuration(remainingSeconds)}
+              </div>
             </div>
           </div>
-          <button
-            className="danger"
-            onClick={hangup}
-            style={{ marginTop: "1rem", width: "100%" }}
-          >
-            Hang Up
-          </button>
+          {remainingSeconds <= 60 && (
+            <div
+              style={{
+                padding: "0.5rem 0.75rem",
+                borderRadius: "0.5rem",
+                background:
+                  remainingSeconds <= 30
+                    ? "rgba(255,68,68,0.15)"
+                    : "rgba(255,170,0,0.15)",
+                color:
+                  remainingSeconds <= 30
+                    ? "var(--red, #ff4444)"
+                    : "var(--yellow, #ffaa00)",
+                fontSize: "0.85rem",
+                marginTop: "0.5rem",
+                textAlign: "center",
+              }}
+            >
+              {remainingSeconds <= 30
+                ? "Running out of time! Add more to keep the call going."
+                : "Time is getting low."}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+            <button
+              className="primary"
+              onClick={() => addTime(300)}
+              style={{ flex: 1 }}
+            >
+              +5 min
+            </button>
+            <button
+              className="danger"
+              onClick={hangup}
+              style={{ flex: 1 }}
+            >
+              Hang Up
+            </button>
+          </div>
         </div>
       )}
 

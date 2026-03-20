@@ -20,30 +20,35 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, Query, State,
+        ConnectInfo, Path, Query, State,
     },
     http::{header, Method, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
+use std::net::SocketAddr;
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, VerifyingKey};
 use futures::{SinkExt, StreamExt};
+use hmac::{Hmac, Mac};
 use mpp::format_www_authenticate;
 use mpp::server::{movement as movement_builder, MovementConfig, MovementSessionOptions, Mpp};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use sha3::{Digest, Sha3_256};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
+use tracing::{info, warn};
 use uuid::Uuid;
+
+type HmacSha256 = Hmac<Sha256>;
 
 const DEFAULT_REST_URL: &str = "https://testnet.movementnetwork.xyz/v1";
 const DEFAULT_MODULE_ADDRESS: &str =
     "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8";
-const DEFAULT_SECRET_KEY: &str = "voice-call-demo-secret";
 
 // ---------------------------------------------------------------------------
 // State types
@@ -90,6 +95,9 @@ struct AppState {
     hosts: DashMap<String, HostInfo>,
     calls: DashMap<String, ActiveCall>,
     module_address: String,
+    secret_key: String,
+    /// Per-IP request counts, reset periodically. Value = (count, window_start).
+    rate_limits: DashMap<String, (u64, Instant)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -146,12 +154,33 @@ struct HangupRequest {
 async fn main() {
     let _ = dotenvy::dotenv();
 
-    let secret_key =
-        std::env::var("SECRET_KEY").unwrap_or_else(|_| DEFAULT_SECRET_KEY.to_string());
+    // Initialize structured logging.
+    // Use RUST_LOG env to control level (default: info). Set LOG_FORMAT=json for JSON output.
+    let log_format = std::env::var("LOG_FORMAT").unwrap_or_default();
+    if log_format == "json" {
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "info".into()),
+            )
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "info".into()),
+            )
+            .init();
+    }
+
+    let secret_key = std::env::var("SECRET_KEY")
+        .expect("SECRET_KEY environment variable is required");
     let module_address =
         std::env::var("MODULE_ADDRESS").unwrap_or_else(|_| DEFAULT_MODULE_ADDRESS.to_string());
     let rest_url =
         std::env::var("REST_URL").unwrap_or_else(|_| DEFAULT_REST_URL.to_string());
+    let allowed_origins = std::env::var("ALLOWED_ORIGINS").ok();
 
     // The recipient in the MPP challenge will be set per-call to the host's address.
     // We use a placeholder here; the actual recipient is set in start_call.
@@ -170,15 +199,30 @@ async fn main() {
         hosts: DashMap::new(),
         calls: DashMap::new(),
         module_address,
+        secret_key,
+        rate_limits: DashMap::new(),
     });
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
-        .allow_headers(Any)
-        .expose_headers([header::WWW_AUTHENTICATE]);
+    let cors = {
+        let base = CorsLayer::new()
+            .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+            .allow_headers(Any)
+            .expose_headers([header::WWW_AUTHENTICATE]);
+
+        match &allowed_origins {
+            Some(origins) => {
+                let parsed: Vec<header::HeaderValue> = origins
+                    .split(',')
+                    .filter_map(|o| o.trim().parse().ok())
+                    .collect();
+                base.allow_origin(parsed)
+            }
+            None => base.allow_origin(Any),
+        }
+    };
 
     let app = Router::new()
+        .route("/health", get(health))
         .route("/api/host/go-live", post(go_live).delete(go_offline))
         .route("/api/host/poll", get(host_poll))
         .route("/api/hosts", get(list_hosts))
@@ -186,20 +230,110 @@ async fn main() {
         .route("/ws/signal/{call_id}", get(ws_signal))
         .route("/api/call/hangup", post(hangup))
         .layer(cors)
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3002")
         .await
         .expect("failed to bind");
 
-    println!("Voice Call Server listening on http://localhost:3002");
-    println!("  POST   /api/host/go-live     — register as host");
-    println!("  DELETE /api/host/go-live     — go offline");
-    println!("  GET    /api/hosts            — list live hosts");
-    println!("  POST   /api/call/start       — initiate call (402 flow)");
-    println!("  GET    /ws/signal/:call_id   — WebRTC signaling WebSocket");
-    println!("  POST   /api/call/hangup      — end call");
-    axum::serve(listener, app).await.expect("server error");
+    info!("Voice Call Server listening on http://localhost:3002");
+    if allowed_origins.is_some() {
+        info!(origins = %allowed_origins.as_deref().unwrap(), "CORS restricted");
+    } else {
+        info!("CORS: open (set ALLOWED_ORIGINS to restrict)");
+    }
+
+    // Background task: sweep stale calls every 60 seconds.
+    let sweep_state = state.clone();
+    let sweep_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            sweep_stale(&sweep_state);
+        }
+    });
+
+    // Graceful shutdown: listen for SIGTERM/SIGINT, then clean up.
+    let shutdown_state = state.clone();
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        let ctrl_c = tokio::signal::ctrl_c();
+        #[cfg(unix)]
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to register SIGTERM handler");
+        #[cfg(unix)]
+        let terminate = sigterm.recv();
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<Option<()>>();
+
+        tokio::select! {
+            _ = ctrl_c => info!("Received SIGINT, shutting down"),
+            _ = terminate => info!("Received SIGTERM, shutting down"),
+        }
+
+        // Clean up: mark all hosts offline and remove all calls.
+        let call_count = shutdown_state.calls.len();
+        let host_count = shutdown_state.hosts.len();
+        shutdown_state.calls.clear();
+        for mut entry in shutdown_state.hosts.iter_mut() {
+            entry.value_mut().online = false;
+            entry.value_mut().busy = false;
+        }
+        info!(calls = call_count, hosts = host_count, "Cleaned up state on shutdown");
+    });
+
+    server.await.expect("server error");
+    sweep_task.abort();
+}
+
+/// Sweep stale calls and rate limit entries.
+fn sweep_stale(state: &AppState) {
+    let now = Instant::now();
+
+    // Remove calls older than 5 minutes with no active WebSocket subscribers.
+    let max_call_age = std::time::Duration::from_secs(300);
+    let mut stale_calls = vec![];
+    for entry in state.calls.iter() {
+        let age = now.duration_since(entry.value().started_at);
+        if age > max_call_age && entry.value().signal_tx.receiver_count() == 0 {
+            stale_calls.push(entry.key().clone());
+        }
+    }
+    for call_id in &stale_calls {
+        if let Some((_, call)) = state.calls.remove(call_id) {
+            if let Some(mut host) = state.hosts.get_mut(&call.host_addr) {
+                host.busy = false;
+            }
+        }
+    }
+    if !stale_calls.is_empty() {
+        info!(count = stale_calls.len(), "Swept stale calls");
+    }
+
+    // Remove stale rate limit entries (older than 2x the window).
+    let max_rl_age = RATE_LIMIT_WINDOW * 2;
+    state.rate_limits.retain(|_, (_, window_start)| {
+        now.duration_since(*window_start) < max_rl_age
+    });
+
+    // Mark stale hosts as offline.
+    let stale_host_timeout = std::time::Duration::from_secs(120);
+    for mut entry in state.hosts.iter_mut() {
+        let h = entry.value_mut();
+        if h.online {
+            if let Some(last_seen) = h.last_seen {
+                if now.duration_since(last_seen) > stale_host_timeout {
+                    h.online = false;
+                    h.busy = false;
+                    info!(address = %entry.key(), "Marked stale host offline");
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -247,12 +381,6 @@ fn verify_go_live_signature(
 
     // Decode the public key bytes (strip 0x prefix).
     let pubkey_clean = pubkey_hex.strip_prefix("0x").unwrap_or(pubkey_hex);
-    println!(
-        "  pubkey hex: 0x{} ({} hex chars = {} bytes)",
-        pubkey_clean,
-        pubkey_clean.len(),
-        pubkey_clean.len() / 2
-    );
     let pubkey_bytes =
         hex::decode(pubkey_clean).map_err(|e| format!("Invalid pubkey hex: {e}"))?;
 
@@ -298,10 +426,6 @@ fn verify_go_live_signature(
     hasher.update([0x00]); // Legacy ed25519 scheme suffix
     let legacy_addr = format!("0x{}", hex::encode(hasher.finalize()));
 
-    println!("  claimed addr:     {}", claimed);
-    println!("  single_key addr:  {}", normalize_addr(&single_key_addr));
-    println!("  legacy addr:      {}", normalize_addr(&legacy_addr));
-
     if normalize_addr(&single_key_addr) != claimed && normalize_addr(&legacy_addr) != claimed {
         return Err("Public key does not match the claimed address".to_string());
     }
@@ -309,11 +433,6 @@ fn verify_go_live_signature(
     // Decode the signature (strip 0x prefix).
     // May be raw 64 bytes or BCS-wrapped AnySignature (0x00 prefix + 64 bytes).
     let sig_clean = signature_hex.strip_prefix("0x").unwrap_or(signature_hex);
-    println!(
-        "  sig hex: 0x{}... ({} bytes)",
-        &sig_clean[..std::cmp::min(16, sig_clean.len())],
-        sig_clean.len() / 2
-    );
     let sig_bytes = hex::decode(sig_clean).map_err(|e| format!("Invalid signature hex: {e}"))?;
 
     let raw_sig = if sig_bytes.len() == 64 {
@@ -336,14 +455,93 @@ fn verify_go_live_signature(
 }
 
 // ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+
+/// Max requests per IP per window.
+const RATE_LIMIT_MAX: u64 = 60;
+/// Window duration for rate limiting.
+const RATE_LIMIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Returns true if the request should be allowed, false if rate-limited.
+fn check_rate_limit(state: &AppState, ip: &str) -> bool {
+    let now = Instant::now();
+    let mut entry = state.rate_limits.entry(ip.to_string()).or_insert((0, now));
+    let (count, window_start) = entry.value_mut();
+
+    if now.duration_since(*window_start) > RATE_LIMIT_WINDOW {
+        *count = 1;
+        *window_start = now;
+        return true;
+    }
+
+    *count += 1;
+    *count <= RATE_LIMIT_MAX
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket auth tokens
+// ---------------------------------------------------------------------------
+
+/// Generate an HMAC token binding (call_id, address) so only the actual
+/// host/caller can connect to the signaling WebSocket.
+fn generate_ws_token(secret: &str, call_id: &str, address: &str) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC key length is always valid");
+    mac.update(format!("ws:{call_id}:{address}").as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+
+fn verify_ws_token(secret: &str, call_id: &str, address: &str, token: &str) -> bool {
+    let expected = generate_ws_token(secret, call_id, address);
+    // Constant-time comparison
+    expected == token
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
+/// GET /health
+async fn health() -> impl IntoResponse {
+    Json(serde_json::json!({ "status": "ok" }))
+}
+
 /// POST /api/host/go-live
 async fn go_live(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<GoLiveRequest>,
 ) -> impl IntoResponse {
+    if !check_rate_limit(&state, &addr.ip().to_string()) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({ "error": "Rate limit exceeded" }))).into_response();
+    }
+
+    // Validate inputs.
+    if !body.address.starts_with("0x") || body.address.len() < 4 || body.address.len() > 68 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid address format" })),
+        )
+            .into_response();
+    }
+    if body.rate_per_second.parse::<u64>().is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "ratePerSecond must be a valid integer" })),
+        )
+            .into_response();
+    }
+    if let Some(ref name) = body.name {
+        if name.len() > 100 {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "Name must be 100 characters or less" })),
+            )
+                .into_response();
+        }
+    }
+
     // Verify the wallet signature before accepting registration.
     if let Err(e) = verify_go_live_signature(
         &body.address,
@@ -352,7 +550,7 @@ async fn go_live(
         &body.signature,
         &body.pubkey,
     ) {
-        println!("Host go-live rejected for {}: {}", body.address, e);
+        warn!("Host go-live rejected for {}: {}", body.address, e);
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({ "error": e })),
@@ -370,7 +568,7 @@ async fn go_live(
         last_seen: Some(Instant::now()),
     };
     state.hosts.insert(body.address.clone(), info.clone());
-    println!("Host go-live (verified): {}", body.address);
+    info!("Host go-live: {}", body.address);
     (StatusCode::OK, Json(serde_json::json!(info))).into_response()
 }
 
@@ -381,13 +579,19 @@ async fn go_offline(
 ) -> impl IntoResponse {
     if let Some(mut host) = state.hosts.get_mut(&body.address) {
         host.online = false;
-        println!("Host offline: {}", body.address);
+        info!("Host offline: {}", body.address);
     }
     StatusCode::OK
 }
 
 /// GET /api/hosts
-async fn list_hosts(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+async fn list_hosts(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    if !check_rate_limit(&state, &addr.ip().to_string()) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({ "error": "Rate limit exceeded" }))).into_response();
+    }
     let now = Instant::now();
     let hosts: Vec<HostInfo> = state
         .hosts
@@ -401,7 +605,7 @@ async fn list_hosts(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
         })
         .map(|entry| entry.value().clone())
         .collect();
-    Json(serde_json::json!(hosts))
+    Json(serde_json::json!(hosts)).into_response()
 }
 
 /// POST /api/call/start?host=0x...
@@ -410,11 +614,24 @@ async fn list_hosts(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
 ///  1. First call (no channel_id): returns 402 with MPP session challenge.
 ///  2. Second call (with channel_id + pubkey): creates the call and returns callId + wsUrl.
 async fn start_call(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<StartCallQuery>,
     Json(body): Json<StartCallBody>,
 ) -> impl IntoResponse {
+    if !check_rate_limit(&state, &addr.ip().to_string()) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({ "error": "Rate limit exceeded" }))).into_response();
+    }
+
     let host_addr = &query.host;
+
+    if !host_addr.starts_with("0x") || host_addr.len() < 4 || host_addr.len() > 68 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid host address format" })),
+        )
+            .into_response();
+    }
 
     // Check host exists and is online.
     let host = match state.hosts.get(host_addr) {
@@ -503,16 +720,19 @@ async fn start_call(
     );
 
     let ws_url = format!("/ws/signal/{call_id}");
-    println!(
-        "Call started: {} -> {} (call_id: {})",
-        body.address, host_addr, call_id
-    );
+    info!("Call started: call_id={}", call_id);
+
+    // Generate auth tokens so only the actual host/caller can connect to the WebSocket.
+    let caller_token = generate_ws_token(&state.secret_key, &call_id, &body.address);
+    let host_token = generate_ws_token(&state.secret_key, &call_id, host_addr);
 
     (
         StatusCode::OK,
         Json(serde_json::json!({
             "callId": call_id,
             "wsUrl": ws_url,
+            "callerToken": caller_token,
+            "hostToken": host_token,
         })),
     )
         .into_response()
@@ -552,9 +772,11 @@ async fn host_poll(
                 stale_calls.push(entry.key().clone());
                 continue;
             }
+            let host_token = generate_ws_token(&state.secret_key, entry.key(), address);
             return Json(serde_json::json!({
                 "callId": entry.key(),
                 "callerAddress": entry.value().caller_addr,
+                "wsToken": host_token,
             }))
             .into_response();
         }
@@ -565,7 +787,7 @@ async fn host_poll(
             if let Some(mut host) = state.hosts.get_mut(&call.host_addr) {
                 host.busy = false;
             }
-            println!("Cleaned up stale call: {}", call_id);
+            info!("Cleaned up stale call: {}", call_id);
         }
     }
 
@@ -579,6 +801,18 @@ async fn ws_signal(
     Query(params): Query<std::collections::HashMap<String, String>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    let addr = params.get("address").cloned().unwrap_or_default();
+    let token = params.get("token").cloned().unwrap_or_default();
+
+    // Verify the WebSocket auth token.
+    if !verify_ws_token(&state.secret_key, &call_id, &addr, &token) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "Invalid WebSocket token" })),
+        )
+            .into_response();
+    }
+
     let call = match state.calls.get(&call_id) {
         Some(c) => c,
         None => {
@@ -595,8 +829,6 @@ async fn ws_signal(
     let caller_addr = call.caller_addr.clone();
     drop(call);
 
-    // Determine identity from query param `address`.
-    let addr = params.get("address").cloned().unwrap_or_default();
     let role = if addr == host_addr {
         "host".to_string()
     } else if addr == caller_addr {
@@ -618,7 +850,7 @@ async fn handle_ws(
     let (mut ws_sink, mut ws_stream) = socket.split();
     let mut signal_rx = signal_tx.subscribe();
 
-    println!("WebSocket connected: {role} ({addr})");
+    info!("WebSocket connected: {role}");
 
     // Relay: broadcast -> this client (skip own messages).
     let addr_clone = addr.clone();
@@ -668,7 +900,7 @@ async fn handle_ws(
         _ = send_task => {},
         _ = recv_task => {},
     }
-    println!("WebSocket disconnected: {role}");
+    info!("WebSocket disconnected: {role}");
 }
 
 /// POST /api/call/hangup
@@ -697,10 +929,7 @@ async fn hangup(
         host.busy = false;
     }
 
-    println!(
-        "Call ended: {} -> {} (duration={}s)",
-        call.caller_addr, call.host_addr, duration
-    );
+    info!("Call ended: duration={}s", duration);
 
     (
         StatusCode::OK,

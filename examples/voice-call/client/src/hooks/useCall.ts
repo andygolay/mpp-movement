@@ -28,9 +28,12 @@ interface CallResult {
   callState: CallState;
   duration: number;
   totalPaid: bigint;
+  deposit: bigint;
+  remainingSeconds: number;
   error: string;
   remoteStream: MediaStream | null;
   startCall: (hostAddress: string, ratePerSecond: bigint) => Promise<void>;
+  addTime: (seconds: number) => Promise<void>;
   hangup: () => Promise<void>;
 }
 
@@ -48,6 +51,8 @@ export function useCall(): CallResult {
   const [callState, setCallState] = useState<CallState>("idle");
   const [duration, setDuration] = useState(0);
   const [totalPaid, setTotalPaid] = useState(0n);
+  const [deposit, setDeposit] = useState(0n);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [error, setError] = useState("");
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
@@ -105,6 +110,8 @@ export function useCall(): CallResult {
       setError("");
       setDuration(0);
       setTotalPaid(0n);
+      setDeposit(0n);
+      setRemainingSeconds(0);
       setRemoteStream(null);
       setCallState("connecting");
       callStateRef.current = "connecting";
@@ -147,8 +154,16 @@ export function useCall(): CallResult {
               functionArguments: unknown[];
             };
           }) => {
-            const result = await signAndSubmitTransaction(payload as never);
-            return { hash: (result as { hash?: string })?.hash ?? "" };
+            // The wallet adapter's type is broader than what MPP expects,
+            // but the shape is compatible at runtime.
+            const result = await signAndSubmitTransaction(
+              payload as Parameters<typeof signAndSubmitTransaction>[0],
+            );
+            const hash =
+              result && typeof result === "object" && "hash" in result
+                ? String((result as unknown as Record<string, unknown>).hash)
+                : "";
+            return { hash };
           },
           account: { address: account.address.toString() },
         };
@@ -158,6 +173,16 @@ export function useCall(): CallResult {
 
         const credential = await provider.pay(challenge);
         const authHeader = formatAuthorization(credential);
+
+        // Track the deposit amount
+        const channelDeposit = provider.getDeposit(
+          hostAddress,
+          TOKEN_METADATA_ADDR,
+        );
+        setDeposit(channelDeposit);
+        if (ratePerSecond > 0n) {
+          setRemainingSeconds(Number(channelDeposit / ratePerSecond));
+        }
 
         // Wait for on-chain confirmation
         await new Promise((r) => setTimeout(r, 2000));
@@ -205,28 +230,23 @@ export function useCall(): CallResult {
         });
         peerConnectionRef.current = pc;
 
-        // Expose for debugging: check audio stats via browser console with
-        //   checkAudio()
-        (window as any).__voiceCallPC = pc;
-        (window as any).checkAudio = async () => {
-          const stats = await pc.getStats();
-          stats.forEach((report: any) => {
-            if (report.type === "inbound-rtp" && report.kind === "audio") {
-              console.log(
-                `[audio] bytes received: ${report.bytesReceived}, packets: ${report.packetsReceived}, lost: ${report.packetsLost}`
-              );
-            }
-            if (report.type === "outbound-rtp" && report.kind === "audio") {
-              console.log(
-                `[audio] bytes sent: ${report.bytesSent}, packets: ${report.packetsSent}`
-              );
-            }
-          });
-        };
-
         // Create data channel for sending vouchers peer-to-peer
         const dataChannel = pc.createDataChannel("vouchers");
         dataChannelRef.current = dataChannel;
+
+        // Detect data channel failures so the caller knows payments stopped
+        dataChannel.onclose = () => {
+          if (callStateRef.current === "in_call") {
+            setError("Payment channel disconnected");
+            hangupInternal();
+          }
+        };
+        dataChannel.onerror = () => {
+          if (callStateRef.current === "in_call") {
+            setError("Payment channel error");
+            hangupInternal();
+          }
+        };
 
         // Add local audio tracks
         localStream.getTracks().forEach((track) => {
@@ -234,7 +254,8 @@ export function useCall(): CallResult {
         });
 
         // 6. Connect signaling
-        const wsUrl = `${SERVER_URL.replace(/^http/, "ws")}/ws/signal/${callId}?address=${account.address}`;
+        const callerToken = callData.callerToken;
+        const wsUrl = `${SERVER_URL.replace(/^http/, "ws")}/ws/signal/${callId}?address=${account.address}&token=${callerToken}`;
         const signaling = connectSignaling(wsUrl, {
           onAnswer(answer) {
             console.log("[caller] received answer");
@@ -343,9 +364,25 @@ export function useCall(): CallResult {
       const dc = dataChannelRef.current;
       if (!provider || !dc || dc.readyState !== "open") return;
 
+      const rate = rateRef.current;
+      const currentDeposit = provider.getDeposit(
+        hostAddressRef.current,
+        TOKEN_METADATA_ADDR,
+      );
+      const currentCumulative = provider.getChannelCumulative(
+        hostAddressRef.current,
+        TOKEN_METADATA_ADDR,
+      );
+
+      // Check if we have enough deposit for the next voucher
+      const delta = rate * 5n;
+      if (currentCumulative + delta > currentDeposit) {
+        // Not enough funds — the call will end
+        hangupInternal();
+        return;
+      }
+
       try {
-        // Delta = rate_per_second * 5 seconds
-        const delta = rateRef.current * 5n;
         const { channelId, cumulativeAmount, signature } =
           provider.signVoucherFor(
             hostAddressRef.current,
@@ -354,6 +391,12 @@ export function useCall(): CallResult {
           );
 
         setTotalPaid(cumulativeAmount);
+
+        // Update remaining time
+        if (rate > 0n) {
+          const remaining = currentDeposit - cumulativeAmount;
+          setRemainingSeconds(Number(remaining / rate));
+        }
 
         dc.send(JSON.stringify({
           channelId: toHex(channelId),
@@ -365,6 +408,38 @@ export function useCall(): CallResult {
         // Voucher send failed, will retry next interval
       }
     }, 5000);
+  }
+
+  async function addTimeInternal(seconds: number) {
+    const provider = sessionProviderRef.current;
+    if (!provider || callStateRef.current !== "in_call") return;
+
+    const rate = rateRef.current;
+    const additionalDeposit = rate * BigInt(seconds);
+
+    try {
+      const { deposit: newDeposit } = await provider.topUp(
+        hostAddressRef.current,
+        TOKEN_METADATA_ADDR,
+        additionalDeposit,
+      );
+
+      setDeposit(newDeposit);
+
+      // Wait for on-chain confirmation
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Update remaining time
+      const cumulative = provider.getChannelCumulative(
+        hostAddressRef.current,
+        TOKEN_METADATA_ADDR,
+      );
+      if (rate > 0n) {
+        setRemainingSeconds(Number((newDeposit - cumulative) / rate));
+      }
+    } catch (e) {
+      setError(`Add time failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   async function hangupInternal() {
@@ -394,6 +469,10 @@ export function useCall(): CallResult {
     callStateRef.current = "ended";
   }
 
+  const addTime = useCallback(async (seconds: number) => {
+    await addTimeInternal(seconds);
+  }, []);
+
   const hangup = useCallback(async () => {
     await hangupInternal();
   }, []);
@@ -402,9 +481,12 @@ export function useCall(): CallResult {
     callState,
     duration,
     totalPaid,
+    deposit,
+    remainingSeconds,
     error,
     remoteStream,
     startCall,
+    addTime,
     hangup,
   };
 }

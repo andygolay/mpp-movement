@@ -141,7 +141,7 @@ export function HostPanel() {
         if (!resp.ok) return;
         const data = await resp.json();
         if (data.callId && statusRef.current === "online") {
-          handleIncomingCall(data.callId, data.callerAddress ?? "");
+          handleIncomingCall(data.callId, data.callerAddress ?? "", data.wsToken ?? "");
         }
       } catch {
         // ignore polling errors
@@ -172,26 +172,12 @@ export function HostPanel() {
         nonce,
       });
 
-      console.log("[go-live] signResult:", signResult);
-      console.log("[go-live] signResult.signature type:", typeof signResult.signature, signResult.signature);
-      console.log("[go-live] signResult.fullMessage:", signResult.fullMessage);
-
       const signature = typeof signResult.signature === "string"
         ? signResult.signature
         : signResult.signature.toString();
 
       // Get the public key hex from the wallet account
       const pubkey = account.publicKey.toString();
-
-      console.log("[go-live] sending:", {
-        address: account.address.toString(),
-        signature,
-        signatureLength: signature.replace("0x", "").length / 2,
-        pubkey,
-        pubkeyLength: pubkey.replace("0x", "").length / 2,
-        fullMessage: signResult.fullMessage,
-        nonce,
-      });
 
       const resp = await fetch(`${SERVER_URL}/api/host/go-live`, {
         method: "POST",
@@ -246,7 +232,7 @@ export function HostPanel() {
     setEarnings(0n);
   }
 
-  async function handleIncomingCall(callId: string, caller: string) {
+  async function handleIncomingCall(callId: string, caller: string, wsToken: string) {
     setStatus("in_call");
     statusRef.current = "in_call";
     callIdRef.current = callId;
@@ -273,25 +259,6 @@ export function HostPanel() {
         }
       });
       peerConnectionRef.current = pc;
-
-      // Expose for debugging: check audio stats via browser console with
-      //   checkAudio()
-      (window as any).__voiceCallPC = pc;
-      (window as any).checkAudio = async () => {
-        const stats = await pc.getStats();
-        stats.forEach((report: any) => {
-          if (report.type === "inbound-rtp" && report.kind === "audio") {
-            console.log(
-              `[audio] bytes received: ${report.bytesReceived}, packets: ${report.packetsReceived}, lost: ${report.packetsLost}`
-            );
-          }
-          if (report.type === "outbound-rtp" && report.kind === "audio") {
-            console.log(
-              `[audio] bytes sent: ${report.bytesSent}, packets: ${report.packetsSent}`
-            );
-          }
-        });
-      };
 
       // Listen for the "vouchers" data channel from the caller
       pc.ondatachannel = (event) => {
@@ -351,7 +318,7 @@ export function HostPanel() {
       let remoteDescSet = false;
 
       // Connect signaling
-      const wsUrl = `${SERVER_URL.replace(/^http/, "ws")}/ws/signal/${callId}?address=${account?.address}`;
+      const wsUrl = `${SERVER_URL.replace(/^http/, "ws")}/ws/signal/${callId}?address=${account?.address}&token=${wsToken}`;
       const signaling = connectSignaling(wsUrl, {
         onOffer: async (offer) => {
           console.log("[host] received offer");
@@ -461,7 +428,7 @@ export function HostPanel() {
             pubkeyArray,
           ],
         },
-      } as never);
+      } as Parameters<typeof signAndSubmitTransaction>[0]);
       return true;
     } catch (e) {
       setError(`Close failed: ${e instanceof Error ? e.message : String(e)}`);
