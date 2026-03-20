@@ -1,6 +1,6 @@
 # Movement Stream Demo
 
-React frontend for the [MPP pay-per-token SSE server](../movement/src/sse_server.rs). Connect a wallet, open a payment channel, and stream AI text paid with USDCx, USDC.e, or MOVE vouchers on Movement testnet.
+React frontend for the [MPP pay-per-token SSE server](../rust/src/sse_server.rs). Connect a wallet, open a payment channel, and stream AI text paid with USDCx, USDC.e, or MOVE vouchers on Movement testnet.
 
 ## How it works
 
@@ -15,10 +15,10 @@ React frontend for the [MPP pay-per-token SSE server](../movement/src/sse_server
 
 ```bash
 # 1. Start the SSE server (from repo root)
-cargo run --manifest-path examples/movement/Cargo.toml --bin movement-sse-server
+cargo run --manifest-path examples/rust/Cargo.toml --bin movement-sse-server
 
 # 2. In another terminal, start the frontend
-cd examples/movement-demo
+cd examples/token-stream
 pnpm install
 pnpm dev
 ```
@@ -27,7 +27,7 @@ Open http://localhost:5173 and connect your wallet.
 
 ## Server environment variables
 
-Set these in `examples/movement/.env` (loaded automatically via dotenvy):
+Set these in `examples/rust/.env` (loaded automatically via dotenvy):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -54,7 +54,7 @@ PRICE_PER_TOKEN=10
 SUGGESTED_DEPOSIT=10000
 ```
 
-Same pricing as USDCx. Ready-made env files: `cp ../.env.usdc-e ../movement/.env && cp .env.usdc-e .env`
+Same pricing as USDCx. Ready-made env files: `cp ../.env.usdc-e ../rust/.env && cp .env.usdc-e .env`
 
 ## Frontend environment variables
 

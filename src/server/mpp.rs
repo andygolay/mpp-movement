@@ -516,6 +516,86 @@ impl<S> Mpp<super::MovementChargeMethod, S> {
         })
     }
 
+    /// Generate a session challenge with a specific recipient (payee) address.
+    ///
+    /// Like [`movement_session_challenge`], but allows overriding the recipient
+    /// per-call. Useful when the payee is a third party (e.g., a host in a
+    /// voice call app) rather than the server itself.
+    pub fn movement_session_challenge_with_recipient(
+        &self,
+        amount_per_unit: &str,
+        recipient: &str,
+        options: super::MovementSessionOptions<'_>,
+    ) -> Result<crate::protocol::core::PaymentChallenge> {
+        let (currency, _default_recipient) = self.require_movement_config()?;
+
+        let module_address = options
+            .module_address
+            .unwrap_or(crate::protocol::methods::movement::DEFAULT_MODULE_ADDRESS);
+
+        let mut method_details = serde_json::json!({
+            "moduleAddress": module_address,
+            "registryAddress": options.registry_address.unwrap_or(module_address),
+            "tokenMetadata": currency,
+        });
+        if let Some(delta) = options.min_voucher_delta {
+            method_details["minVoucherDelta"] = serde_json::json!(delta);
+        }
+
+        let request = crate::protocol::intents::SessionRequest {
+            amount: amount_per_unit.to_string(),
+            unit_type: options.unit_type.map(|s| s.to_string()),
+            currency: currency.to_string(),
+            recipient: Some(recipient.to_string()),
+            suggested_deposit: options.suggested_deposit.map(|s| s.to_string()),
+            method_details: Some(method_details),
+            ..Default::default()
+        };
+        let encoded = crate::protocol::core::Base64UrlJson::from_typed(&request)?;
+
+        let expires_str;
+        let expires = match options.expires {
+            Some(e) => Some(e),
+            None => {
+                let expiry = time::OffsetDateTime::now_utc()
+                    + time::Duration::minutes(
+                        crate::protocol::methods::movement::DEFAULT_EXPIRES_MINUTES as i64,
+                    );
+                expires_str = expiry
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .map_err(|e| {
+                        crate::error::MppError::InvalidConfig(format!(
+                            "failed to format expires: {e}"
+                        ))
+                    })?;
+                Some(expires_str.as_str())
+            }
+        };
+
+        let id = crate::protocol::core::compute_challenge_id(
+            &self.secret_key,
+            &self.realm,
+            crate::protocol::methods::movement::METHOD_NAME,
+            crate::protocol::methods::movement::INTENT_SESSION,
+            encoded.raw(),
+            expires,
+            None,
+            None,
+        );
+
+        Ok(crate::protocol::core::PaymentChallenge {
+            id,
+            realm: self.realm.clone(),
+            method: crate::protocol::methods::movement::METHOD_NAME.into(),
+            intent: crate::protocol::methods::movement::INTENT_SESSION.into(),
+            request: encoded,
+            expires: expires.map(|s| s.to_string()),
+            description: options.description.map(|s| s.to_string()),
+            digest: None,
+            opaque: None,
+        })
+    }
+
     fn require_movement_config(&self) -> Result<(&str, &str)> {
         let currency = self.currency.as_deref().ok_or_else(|| {
             crate::error::MppError::InvalidConfig(

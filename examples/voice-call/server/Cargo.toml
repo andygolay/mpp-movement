@@ -1,0 +1,22 @@
+[package]
+name = "voice-call-server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "voice-call-server"
+path = "src/main.rs"
+
+[dependencies]
+mpp = { path = "../../..", features = ["movement", "server", "client", "axum"] }
+futures = "0.3"
+hex = "0.4"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors"] }
+dashmap = "6"
+uuid = { version = "1", features = ["v4"] }
+dotenvy = "0.15"

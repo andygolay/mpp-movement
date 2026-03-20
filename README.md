@@ -103,14 +103,14 @@ let valid = voucher::verify_voucher(&channel_id, amount, &sig, &pubkey, &authori
 
 ## Examples
 
-All examples run against Movement testnet with real on-chain transactions. See [`examples/movement/`](./examples/movement/).
+All examples run against Movement testnet with real on-chain transactions. See [`examples/`](./examples/).
 
 ### Fortune Teller (one-time charge)
 
 Server uses `Mpp::create_movement()` + Axum `MppCharge` extractor. Client uses `MovementProvider` + `send_with_payment()`.
 
 ```bash
-cd examples/movement
+cd examples/rust
 cargo run --bin movement-payment-server    # Terminal 1
 cargo run --bin movement-payment-client    # Terminal 2
 ```
@@ -120,7 +120,7 @@ cargo run --bin movement-payment-client    # Terminal 2
 Server verifies vouchers via `SessionMethod`. Client uses `MovementSessionProvider` — opens a channel on the first request, then sends off-chain vouchers for subsequent requests.
 
 ```bash
-cd examples/movement
+cd examples/rust
 cargo run --bin movement-multifetch-server    # Terminal 1
 cargo run --bin movement-multifetch-client    # Terminal 2
 ```
@@ -130,21 +130,30 @@ cargo run --bin movement-multifetch-client    # Terminal 2
 Server streams tokens via Server-Sent Events, settling vouchers on-chain periodically. Client opens a channel and pays per token batch.
 
 ```bash
-cd examples/movement
+cd examples/rust
 cargo run --bin movement-sse-server    # Terminal 1
 cargo run --bin movement-sse-client    # Terminal 2
 ```
 
-### React Demo
+### Streaming Demo (React)
 
 A browser-based demo that connects to the SSE server. Users connect a Movement wallet, open a payment channel, and stream AI text paid with off-chain vouchers.
 
 ```bash
-cargo run --manifest-path examples/movement/Cargo.toml --bin movement-sse-server  # Terminal 1
-cd examples/movement-demo && pnpm install && pnpm dev                              # Terminal 2
+cargo run --manifest-path examples/rust/Cargo.toml --bin movement-sse-server  # Terminal 1
+cd examples/token-stream && pnpm install && pnpm dev                            # Terminal 2
 ```
 
-Open http://localhost:5173. Supports MOVE, USDCx, and USDC.e — configure via `.env` files (see [`examples/movement/.env.example`](./examples/movement/.env.example)).
+Open http://localhost:5173. Supports MOVE, USDCx, and USDC.e — configure via `.env` files (see [`examples/rust/.env.example`](./examples/rust/.env.example)).
+
+### Voice Call (React + Rust)
+
+Pay-per-second voice calls using WebRTC + MPP payment channels. Trustless design — vouchers flow peer-to-peer over a WebRTC data channel, the server never touches funds. See [`examples/voice-call/`](./examples/voice-call/).
+
+```bash
+cd examples/voice-call/server && cargo run                    # Terminal 1
+cd examples/voice-call/client && pnpm install && pnpm dev     # Terminal 2
+```
 
 ## On-Chain Contract
 

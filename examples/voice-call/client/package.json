@@ -1,0 +1,26 @@
+{
+  "name": "voice-call-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mpp/client": "file:../../../ts/client",
+    "@moveindustries/ts-sdk": "5.1.6",
+    "@moveindustries/wallet-adapter-react": "7.4.1",
+    "@noble/curves": "^1.8.0",
+    "@noble/hashes": "^1.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.5.0",
+    "vite": "^6.0.0"
+  }
+}

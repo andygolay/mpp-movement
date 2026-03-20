@@ -1,0 +1,57 @@
+{
+  "name": "@mpp/client",
+  "version": "0.5.0",
+  "description": "TypeScript client SDK for the Machine Payments Protocol (MPP)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./movement": {
+      "import": "./dist/movement/index.js",
+      "types": "./dist/movement/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.8.0",
+    "@noble/hashes": "^1.4.0"
+  },
+  "peerDependencies": {
+    "@moveindustries/ts-sdk": "^5.1.6"
+  },
+  "peerDependenciesMeta": {
+    "@moveindustries/ts-sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@moveindustries/ts-sdk": "5.1.6",
+    "typescript": "^5.5.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andygolay/mpp-movement",
+    "directory": "ts/client"
+  },
+  "keywords": [
+    "mpp",
+    "payments",
+    "402",
+    "movement",
+    "http"
+  ]
+}
