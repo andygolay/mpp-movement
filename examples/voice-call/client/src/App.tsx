@@ -6,8 +6,17 @@ import { CallerPanel } from "./components/CallerPanel";
 
 type Mode = "caller" | "host";
 
+// Auto-switch to host mode if there's an unsettled voucher
+function getInitialMode(): Mode {
+  try {
+    const voucher = localStorage.getItem("voice-call-unsettled-voucher");
+    if (voucher) return "host";
+  } catch {}
+  return "caller";
+}
+
 export default function App() {
-  const [mode, setMode] = useState<Mode>("caller");
+  const [mode, setMode] = useState<Mode>(getInitialMode);
 
   return (
     <MovementWalletAdapterProvider autoConnect>

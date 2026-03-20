@@ -346,12 +346,22 @@ export function HostPanel() {
         pc.addTrack(track, localStream);
       });
 
+      // Queue ICE candidates until remote description is set
+      const pendingCandidates: RTCIceCandidateInit[] = [];
+      let remoteDescSet = false;
+
       // Connect signaling
       const wsUrl = `${SERVER_URL.replace(/^http/, "ws")}/ws/signal/${callId}?address=${account?.address}`;
       const signaling = connectSignaling(wsUrl, {
         onOffer: async (offer) => {
           console.log("[host] received offer");
           await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          remoteDescSet = true;
+          // Flush any queued ICE candidates
+          for (const c of pendingCandidates) {
+            await pc.addIceCandidate(new RTCIceCandidate(c));
+          }
+          pendingCandidates.length = 0;
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           console.log("[host] sending answer");
@@ -361,7 +371,11 @@ export function HostPanel() {
           });
         },
         onIceCandidate(candidate) {
-          pc.addIceCandidate(new RTCIceCandidate(candidate));
+          if (remoteDescSet) {
+            pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } else {
+            pendingCandidates.push(candidate);
+          }
         },
         onError(msg) {
           setError(`Signaling: ${msg}`);
@@ -410,21 +424,21 @@ export function HostPanel() {
   function endCall() {
     // Called by WebSocket/peer disconnect — ignore if already hanging up.
     if (statusRef.current !== "in_call") return;
-    // Don't close channel here — just clean up the connection.
-    // The host still has the voucher data and can close manually.
     cleanup();
-    if (callIdRef.current) {
-      fetch(`${SERVER_URL}/api/call/hangup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callId: callIdRef.current }),
-      }).catch(() => {});
-    }
+    // Don't call /api/call/hangup here — the other party already did it
+    // (which is what triggered the disconnect). Calling it again returns 404.
     callIdRef.current = "";
-    setStatus("online");
-    statusRef.current = "online";
-    setCallerAddress("");
-    setCallDuration(0);
+
+    // If there's an unsettled voucher, go to unsettled state so the host can collect.
+    if (highestVoucherRef.current && highestVoucherRef.current.cumulativeAmount !== "0") {
+      setStatus("unsettled");
+      statusRef.current = "unsettled";
+    } else {
+      setStatus("online");
+      statusRef.current = "online";
+      setCallerAddress("");
+      setCallDuration(0);
+    }
   }
 
   async function settleOnChain(): Promise<boolean> {
@@ -519,7 +533,7 @@ export function HostPanel() {
       : status === "online"
         ? "Live - Waiting for calls"
         : status === "unsettled"
-          ? "Unsettled - Payment pending"
+          ? "Call ended - Collect payment"
           : status === "settling"
             ? "Settling..."
             : "In Call";
@@ -621,35 +635,21 @@ export function HostPanel() {
         <div className="call-info">
           <div className="status-grid">
             <div className="status-item">
-              <label>Unsettled Earnings</label>
+              <label>Earnings</label>
               <div className="value green">
                 {formatAmount(earnings)} {TOKEN_SYMBOL}
               </div>
             </div>
           </div>
           <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
-            The on-chain settlement failed or was rejected. Your voucher is still valid — retry to collect your earnings.
+            Close the payment channel on-chain to collect your earnings.
           </p>
           <button
             className="primary"
             onClick={handleRetrySettle}
             style={{ marginTop: "1rem" }}
           >
-            Retry Settlement
-          </button>
-          <button
-            className="danger"
-            onClick={() => {
-              highestVoucherRef.current = null;
-    saveVoucher(null);
-              setStatus("online");
-              statusRef.current = "online";
-              setEarnings(0n);
-              setError("");
-            }}
-            style={{ marginTop: "0.5rem" }}
-          >
-            Skip (forfeit earnings)
+            Get Paid
           </button>
         </div>
       )}
