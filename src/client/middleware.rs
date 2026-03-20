@@ -21,10 +21,10 @@ use crate::protocol::core::{format_authorization, parse_www_authenticate, AUTHOR
 /// # Examples
 ///
 /// ```ignore
-/// use mpp::client::{PaymentMiddleware, TempoProvider};
+/// use mpp::client::{PaymentMiddleware, MovementProvider};
 /// use reqwest_middleware::ClientBuilder;
 ///
-/// let provider = TempoProvider::new(signer, "https://rpc.moderato.tempo.xyz")?;
+/// let provider = MovementProvider::new(signer, "https://testnet.movementnetwork.xyz/v1")?;
 ///
 /// let client = ClientBuilder::new(reqwest::Client::new())
 ///     .with(PaymentMiddleware::new(provider))
@@ -199,7 +199,7 @@ mod tests {
             let challenge = PaymentChallenge::new(
                 "mw-test-id",
                 "middleware.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 request,
             );

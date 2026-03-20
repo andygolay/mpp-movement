@@ -18,7 +18,7 @@ use std::future::Future;
 /// # Intent = Schema, Method = Implementation
 ///
 /// - **Intent** ("charge"): Defines the shared schema (`ChargeRequest`)
-/// - **Method** (e.g., "tempo"): Implements verification for that schema
+/// - **Method** (e.g., "movement"): Implements verification for that schema
 ///
 /// This design allows clients to parse any charge request consistently
 /// while servers use method-specific verification logic.
@@ -76,7 +76,7 @@ use std::future::Future;
 /// }
 /// ```
 pub trait ChargeMethod: Clone + Send + Sync {
-    /// Payment method identifier (e.g., "tempo", "stripe", "base").
+    /// Payment method identifier (e.g., "movement", "stripe", "base").
     ///
     /// This should match the `method` field in payment challenges.
     fn method(&self) -> &str;

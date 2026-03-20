@@ -402,7 +402,7 @@ mod tests {
         PaymentChallenge::new(
             "test-id",
             "test-realm",
-            "tempo",
+            "movement",
             "charge",
             Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap(),
         )
@@ -421,7 +421,7 @@ mod tests {
             Ok(PaymentChallenge::new(
                 "mock-id",
                 "mock-realm",
-                "tempo",
+                "movement",
                 "charge",
                 Base64UrlJson::from_value(&serde_json::json!({"amount": amount})).unwrap(),
             ))
@@ -437,7 +437,7 @@ mod tests {
                 if accept {
                     Ok(Receipt {
                         status: crate::protocol::core::ReceiptStatus::Success,
-                        method: crate::protocol::core::MethodName::new("tempo"),
+                        method: crate::protocol::core::MethodName::new("movement"),
                         timestamp: "2025-01-01T00:00:00Z".into(),
                         reference: "0xabc".into(),
                     })
@@ -532,7 +532,7 @@ mod tests {
 
         let receipt = Receipt {
             status: ReceiptStatus::Success,
-            method: MethodName::new("tempo"),
+            method: MethodName::new("movement"),
             timestamp: "2025-01-01T00:00:00Z".into(),
             reference: "0xabc".into(),
         };

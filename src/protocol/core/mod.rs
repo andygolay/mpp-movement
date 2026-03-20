@@ -19,7 +19,7 @@
 //!
 //! # Types
 //!
-//! - [`MethodName`]: Payment method identifier (e.g., "tempo", "base", "stripe")
+//! - [`MethodName`]: Payment method identifier (e.g., "movement", "base", "stripe")
 //! - [`IntentName`]: Payment intent identifier (e.g., "charge", "authorize")
 //! - [`Base64UrlJson`]: JSON encoded as base64url (preserves original encoding)
 //! - [`PaymentChallenge`]: Challenge from server (WWW-Authenticate header)
@@ -46,7 +46,7 @@
 //! use mpp::protocol::core::*;
 //!
 //! // Parse a challenge
-//! let header = r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJVU0QifQ""#;
+//! let header = r#"Payment id="abc", realm="api", method="movement", intent="charge", request="eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJVU0QifQ""#;
 //! let challenge = parse_www_authenticate(header).unwrap();
 //! println!("Method: {}, Intent: {}", challenge.method, challenge.intent);
 //!

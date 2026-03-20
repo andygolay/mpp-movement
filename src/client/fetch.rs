@@ -17,10 +17,10 @@ use crate::protocol::core::{format_authorization, parse_www_authenticate, AUTHOR
 /// # Examples
 ///
 /// ```ignore
-/// use mpp::client::{Fetch, TempoProvider};
+/// use mpp::client::{Fetch, MovementProvider};
 /// use reqwest::Client;
 ///
-/// let provider = TempoProvider::new(signer, "https://rpc.moderato.tempo.xyz")?;
+/// let provider = MovementProvider::new(signer, "https://testnet.movementnetwork.xyz/v1")?;
 /// let client = Client::new();
 ///
 /// let resp = client
@@ -170,7 +170,7 @@ mod tests {
             let challenge = PaymentChallenge::new(
                 "test-id-123",
                 "test.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 request,
             );

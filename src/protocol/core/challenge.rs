@@ -19,7 +19,7 @@ use super::types::{Base64UrlJson, IntentName, MethodName, PayloadType, ReceiptSt
 /// use mpp::protocol::core::{PaymentChallenge, parse_www_authenticate};
 /// use mpp::protocol::intents::ChargeRequest;
 ///
-/// let header = r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJVU0QifQ""#;
+/// let header = r#"Payment id="abc", realm="api", method="movement", intent="charge", request="eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJVU0QifQ""#;
 /// let challenge = parse_www_authenticate(header).unwrap();
 /// if challenge.intent.is_charge() {
 ///     let req: ChargeRequest = challenge.request.decode().unwrap();
@@ -79,12 +79,12 @@ impl PaymentChallenge {
     /// let challenge = PaymentChallenge::new(
     ///     "explicit-id-123",
     ///     "api.example.com",
-    ///     "tempo",
+    ///     "movement",
     ///     "charge",
     ///     Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap(),
     /// );
     /// assert_eq!(challenge.id, "explicit-id-123");
-    /// assert_eq!(challenge.method.as_str(), "tempo");
+    /// assert_eq!(challenge.method.as_str(), "movement");
     /// ```
     pub fn new(
         id: impl Into<String>,
@@ -123,7 +123,7 @@ impl PaymentChallenge {
     /// let challenge = PaymentChallenge::with_secret_key(
     ///     "my-server-secret",
     ///     "api.example.com",
-    ///     "tempo",
+    ///     "movement",
     ///     "charge",
     ///     Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap(),
     /// );
@@ -315,7 +315,7 @@ impl PaymentChallenge {
     /// use mpp::PaymentChallenge;
     ///
     /// # let challenge = PaymentChallenge::from_header(
-    /// #     r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="e30""#
+    /// #     r#"Payment id="abc", realm="api", method="movement", intent="charge", request="e30""#
     /// # ).unwrap();
     /// let is_valid = challenge.verify("my-server-secret");
     /// ```
@@ -434,7 +434,7 @@ impl PaymentChallenge {
 /// let id = compute_challenge_id(
 ///     "my-secret-key",
 ///     "api.example.com",
-///     "tempo",
+///     "movement",
 ///     "charge",
 ///     "eyJhbW91bnQiOiIxMDAwMDAwIn0",
 ///     None,
@@ -847,7 +847,7 @@ mod tests {
         PaymentChallenge {
             id: "abc123".to_string(),
             realm: "api".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request: Base64UrlJson::from_value(&serde_json::json!({
                 "amount": "10000",
@@ -868,7 +868,7 @@ mod tests {
 
         assert_eq!(echo.id, "abc123");
         assert_eq!(echo.realm, "api");
-        assert_eq!(echo.method.as_str(), "tempo");
+        assert_eq!(echo.method.as_str(), "movement");
         assert_eq!(echo.intent.as_str(), "charge");
         assert_eq!(echo.request.raw(), challenge.request.raw());
     }
@@ -1000,7 +1000,7 @@ mod tests {
     fn test_payment_receipt_status() {
         let success = Receipt {
             status: ReceiptStatus::Success,
-            method: "tempo".into(),
+            method: "movement".into(),
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             reference: "0xabc".to_string(),
         };
@@ -1009,17 +1009,17 @@ mod tests {
 
     #[test]
     fn test_challenge_from_header() {
-        let header = r#"Payment id="abc123", realm="api", method="tempo", intent="charge", request="eyJhbW91bnQiOiIxMDAwIn0""#;
+        let header = r#"Payment id="abc123", realm="api", method="movement", intent="charge", request="eyJhbW91bnQiOiIxMDAwIn0""#;
         let challenge = PaymentChallenge::from_header(header).unwrap();
         assert_eq!(challenge.id, "abc123");
-        assert_eq!(challenge.method.as_str(), "tempo");
+        assert_eq!(challenge.method.as_str(), "movement");
     }
 
     #[test]
     fn test_challenge_from_headers() {
         let headers = vec![
             "Bearer token",
-            r#"Payment id="a", realm="api", method="tempo", intent="charge", request="e30""#,
+            r#"Payment id="a", realm="api", method="movement", intent="charge", request="e30""#,
             r#"Payment id="b", realm="api", method="base", intent="charge", request="e30""#,
         ];
         let results = PaymentChallenge::from_headers(headers);
@@ -1041,7 +1041,7 @@ mod tests {
 
     #[test]
     fn test_receipt_from_header() {
-        let receipt = Receipt::success("tempo", "0xabc123");
+        let receipt = Receipt::success("movement", "0xabc123");
         let header = receipt.to_header().unwrap();
         let parsed = Receipt::from_header(&header).unwrap();
         assert!(parsed.is_success());
@@ -1060,7 +1060,7 @@ mod tests {
         let id = compute_challenge_id(
             secret,
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1071,7 +1071,7 @@ mod tests {
         let challenge = PaymentChallenge {
             id,
             realm: "api.example.com".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request,
             expires: None,
@@ -1089,7 +1089,7 @@ mod tests {
         let id = compute_challenge_id(
             "correct-secret",
             "api",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1100,7 +1100,7 @@ mod tests {
         let challenge = PaymentChallenge {
             id,
             realm: "api".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request,
             expires: None,
@@ -1119,7 +1119,7 @@ mod tests {
         let challenge = PaymentChallenge {
             id: "tampered-id".to_string(),
             realm: "api".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request,
             expires: None,
@@ -1141,7 +1141,7 @@ mod tests {
         let id = compute_challenge_id(
             secret,
             "payments.example.org",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             expires,
@@ -1152,7 +1152,7 @@ mod tests {
         let challenge = PaymentChallenge {
             id,
             realm: "payments.example.org".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request,
             expires: expires.map(String::from),
@@ -1170,7 +1170,7 @@ mod tests {
         let id = compute_challenge_id(
             "test-secret-key-12345",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             &crate::protocol::core::base64url_encode(
                 br#"{"amount":"1000000","currency":"0x20c0000000000000000000000000000000000000","recipient":"0x1234567890abcdef1234567890abcdef12345678"}"#,
@@ -1179,7 +1179,7 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(id, "XmJ98SdsAdzwP9Oa-8In322Uh6yweMO6rywdomWk_V4");
+        assert_eq!(id, "5Z9rcvTGo93G_8hfg9pqqvPBno-RsXIVyqglY_b68cI");
     }
 
     /// Cross-SDK golden vectors (shared with mppx and pympp).
@@ -1215,82 +1215,82 @@ mod tests {
             (
                 "required fields only",
                 "api.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 &req_amount,
                 None,
                 None,
-                "X6v1eo7fJ76gAxqY0xN9Jd__4lUyDDYmriryOM-5FO4",
+                "-rYElqDZb25NS-1bbvOrRt_-8SC7v-zdhiXsj_I1yVE",
             ),
             (
                 "with expires",
                 "api.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 &req_amount,
                 Some("2025-01-06T12:00:00Z"),
                 None,
-                "ChPX33RkKSZoSUyZcu8ai4hhkvjZJFkZVnvWs5s0iXI",
+                "lJVnHkJnFsUNzuDROOXWG1f51WrnhXeYH4Z9k064D7Y",
             ),
             (
                 "with digest",
                 "api.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 &req_amount,
                 None,
                 Some("sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"),
-                "JHB7EFsPVb-xsYCo8LHcOzeX1gfXWVoUSzQsZhKAfKM",
+                "Tmzqkrhv-Os0eplParMQvjjGJPZO1RUCjHbApXk6XDc",
             ),
             (
                 "with expires and digest",
                 "api.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 &req_amount,
                 Some("2025-01-06T12:00:00Z"),
                 Some("sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"),
-                "m39jbWWCIfmfJZSwCfvKFFtBl0Qwf9X4nOmDb21peLA",
+                "PvwXB9MSmvOov2A0gNPKvby6cgVS_Als1iHgKMS4f5U",
             ),
             (
                 "multi-field request",
                 "api.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 &req_multi,
                 None,
                 None,
-                "_H5TOnnlW0zduQ5OhQ3EyLVze_TqxLDPda2CGZPZxOc",
+                "N3Nq1e5dznK-8J9nHAQnlFUHq9QhfuvoRjLMeah-cLk",
             ),
             (
                 "nested methodDetails",
                 "api.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 &req_nested,
                 None,
                 None,
-                "TqujwpuDDg_zsWGINAd5XObO2rRe6uYufpqvtDmr6N8",
+                "CR-WsINhz75m8CijK8dEtpyU0HKDSirXH5Q8UR7DYOI",
             ),
             (
                 "empty request",
                 "api.example.com",
-                "tempo",
+                "movement",
                 "charge",
                 &req_empty,
                 None,
                 None,
-                "yLN7yChAejW9WNmb54HpJIWpdb1WWXeA3_aCx4dxmkU",
+                "-kSHpmZjz7Zp0ZQlWUj6bCE7Ws7d_YinKzdI9N9AyAM",
             ),
             (
                 "different realm",
                 "payments.other.com",
-                "tempo",
+                "movement",
                 "charge",
                 &req_amount,
                 None,
                 None,
-                "3F5bOo2a9RUihdwKk4hGRvBvzQmVPBMDvW0YM-8GD00",
+                "Xrf-TjF6stFDXQI3RqhZ-1LeBNbdud0hW_G92A0UjPg",
             ),
             (
                 "different method",
@@ -1305,12 +1305,12 @@ mod tests {
             (
                 "different intent",
                 "api.example.com",
-                "tempo",
+                "movement",
                 "session",
                 &req_amount,
                 None,
                 None,
-                "aAY7_IEDzsznNYplhOSE8cERQxvjFcT4Lcn-7FHjLVE",
+                "rozgV9MTlng1cxAucAUm_hEm-EGR0x_SUuqqaCdpnBA",
             ),
         ];
 
@@ -1372,7 +1372,7 @@ mod tests {
         let id1 = compute_challenge_id(
             "secret",
             "api",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1382,7 +1382,7 @@ mod tests {
         let id2 = compute_challenge_id(
             "secret",
             "api",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1400,7 +1400,7 @@ mod tests {
         let id1 = compute_challenge_id(
             "secret-a",
             "api",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1410,7 +1410,7 @@ mod tests {
         let id2 = compute_challenge_id(
             "secret-b",
             "api",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1429,7 +1429,7 @@ mod tests {
         let id = compute_challenge_id(
             secret,
             "api",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1443,7 +1443,7 @@ mod tests {
         let challenge = PaymentChallenge {
             id,
             realm: "api".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request: tampered_request,
             expires: None,
@@ -1459,10 +1459,10 @@ mod tests {
     fn test_challenge_new() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
         let challenge =
-            PaymentChallenge::new("my-id", "api.example.com", "tempo", "charge", request);
+            PaymentChallenge::new("my-id", "api.example.com", "movement", "charge", request);
         assert_eq!(challenge.id, "my-id");
         assert_eq!(challenge.realm, "api.example.com");
-        assert_eq!(challenge.method.as_str(), "tempo");
+        assert_eq!(challenge.method.as_str(), "movement");
         assert_eq!(challenge.intent.as_str(), "charge");
         assert!(challenge.expires.is_none());
         assert!(challenge.description.is_none());
@@ -1475,7 +1475,7 @@ mod tests {
         let challenge = PaymentChallenge::with_secret_key(
             "my-secret",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request,
         );
@@ -1489,7 +1489,7 @@ mod tests {
         let challenge = PaymentChallenge::with_secret_key_full(
             "my-secret",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request,
             Some("2026-01-01T00:00:00Z"),
@@ -1509,7 +1509,7 @@ mod tests {
         let id_without = compute_challenge_id(
             "test-secret",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1521,7 +1521,7 @@ mod tests {
         let id_with = compute_challenge_id(
             "test-secret",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request.raw(),
             None,
@@ -1540,7 +1540,7 @@ mod tests {
         let challenge = PaymentChallenge::with_secret_key_full(
             "my-secret",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request,
             None,
@@ -1560,7 +1560,7 @@ mod tests {
         let mut challenge = PaymentChallenge::with_secret_key_full(
             "my-secret",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request,
             None,
@@ -1583,7 +1583,7 @@ mod tests {
         let challenge = PaymentChallenge::with_secret_key_full(
             "my-secret",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request,
             None,
@@ -1614,32 +1614,23 @@ mod tests {
         let id1 = compute_challenge_id(
             secret,
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             req.raw(),
             None,
             None,
             Some(opaque1.raw()),
         );
-        assert_eq!(
-            id1, "rxzKZ2qjXvinqCH96RORTZEPs1KXsA-0AUjrCAPFOWc",
-            "opaque golden vector failed: with opaque"
-        );
-
         // Vector 2: with opaque and expires
         let id2 = compute_challenge_id(
             secret,
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             req.raw(),
             Some("2025-01-06T12:00:00Z"),
             None,
             Some(opaque1.raw()),
-        );
-        assert_eq!(
-            id2, "KAfoMrA4fnzS1DPWN_cUv_b3_yHxCizdp6OhH7gluMY",
-            "opaque golden vector failed: with opaque and expires"
         );
 
         // Vector 3: with empty opaque {}
@@ -1647,16 +1638,12 @@ mod tests {
         let id3 = compute_challenge_id(
             secret,
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             req.raw(),
             None,
             None,
             Some(opaque_empty.raw()),
-        );
-        assert_eq!(
-            id3, "vb4IyH-0LdJ3s7L0QAw8jIzcZkyxksPhIvEfmHmzA9k",
-            "opaque golden vector failed: with empty opaque"
         );
 
         // Vector 4: with multi-key opaque (JCS sorts keys alphabetically)
@@ -1667,15 +1654,28 @@ mod tests {
         let id4 = compute_challenge_id(
             secret,
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             req.raw(),
             None,
             None,
             Some(opaque_multi.raw()),
         );
+
         assert_eq!(
-            id4, "aKskU8sadR5ZuFbUCsIwhO-ENxuVpTw17FdwHEXsJDk",
+            id1, "C7AdpNuabMyrIblfRnU4FEcewR3FZczhcYAyIvhulWg",
+            "opaque golden vector failed: with opaque"
+        );
+        assert_eq!(
+            id2, "38AJTa1xqMzDmJtjuS2EM6egVqTcjPTq6Jl3cPHi_x0",
+            "opaque golden vector failed: with opaque and expires"
+        );
+        assert_eq!(
+            id3, "ZjDp6P4qw528Xgs5PbhOlIjKGUK_Xgr0Lm4YCrbSKYE",
+            "opaque golden vector failed: with empty opaque"
+        );
+        assert_eq!(
+            id4, "h2E2mEkxB7FlAB01tiJv2crHisQ3uskV29_BLi7A2y0",
             "opaque golden vector failed: with multi-key opaque"
         );
     }
@@ -1690,7 +1690,7 @@ mod tests {
         let challenge = PaymentChallenge::with_secret_key_full(
             "test-secret",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             request,
             Some("2025-01-06T12:00:00Z"),
@@ -1735,7 +1735,7 @@ mod tests {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
         let opaque = Base64UrlJson::from_value(&serde_json::json!({"key": "val"})).unwrap();
         let challenge =
-            PaymentChallenge::new("id", "api", "tempo", "charge", request).with_opaque(opaque);
+            PaymentChallenge::new("id", "api", "movement", "charge", request).with_opaque(opaque);
         assert!(challenge.opaque.is_some());
         let decoded: std::collections::HashMap<String, String> =
             challenge.opaque.unwrap().decode().unwrap();
@@ -1745,7 +1745,7 @@ mod tests {
     #[test]
     fn test_challenge_builder_methods() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2026-01-01T00:00:00Z")
             .with_description("test")
             .with_digest("sha-256=abc");
@@ -1757,14 +1757,14 @@ mod tests {
     #[test]
     fn test_is_expired_no_expires() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request);
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request);
         assert!(!challenge.is_expired());
     }
 
     #[test]
     fn test_is_expired_future() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2099-01-01T00:00:00Z");
         assert!(!challenge.is_expired());
     }
@@ -1772,7 +1772,7 @@ mod tests {
     #[test]
     fn test_is_expired_past() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2020-01-01T00:00:00Z");
         assert!(challenge.is_expired());
     }
@@ -1780,7 +1780,7 @@ mod tests {
     #[test]
     fn test_is_expired_unparseable() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("not-a-date");
         assert!(challenge.is_expired()); // fail-closed: unparseable → expired
     }
@@ -1788,7 +1788,7 @@ mod tests {
     #[test]
     fn test_expires_at_valid() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2099-01-01T00:00:00Z");
         assert!(challenge.expires_at().is_some());
     }
@@ -1796,7 +1796,7 @@ mod tests {
     #[test]
     fn test_expires_at_missing() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request);
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request);
         assert!(challenge.expires_at().is_none());
     }
 
@@ -1804,14 +1804,14 @@ mod tests {
     fn test_expires_at_invalid() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
         let challenge =
-            PaymentChallenge::new("id", "api", "tempo", "charge", request).with_expires("garbage");
+            PaymentChallenge::new("id", "api", "movement", "charge", request).with_expires("garbage");
         assert!(challenge.expires_at().is_none());
     }
 
     #[test]
     fn test_is_expired_positive_timezone_offset_future() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2099-01-01T00:00:00+05:00");
         assert!(!challenge.is_expired());
         assert!(challenge.expires_at().is_some());
@@ -1820,7 +1820,7 @@ mod tests {
     #[test]
     fn test_is_expired_negative_timezone_offset_past() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2020-01-01T00:00:00-07:00");
         assert!(challenge.is_expired());
     }
@@ -1828,7 +1828,7 @@ mod tests {
     #[test]
     fn test_is_expired_fractional_seconds_millis() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2099-01-01T00:00:00.123Z");
         assert!(!challenge.is_expired());
         assert!(challenge.expires_at().is_some());
@@ -1837,7 +1837,7 @@ mod tests {
     #[test]
     fn test_is_expired_fractional_seconds_micros() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2099-01-01T00:00:00.123456Z");
         assert!(!challenge.is_expired());
     }
@@ -1846,7 +1846,7 @@ mod tests {
     fn test_is_expired_empty_string() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
         let challenge =
-            PaymentChallenge::new("id", "api", "tempo", "charge", request).with_expires("");
+            PaymentChallenge::new("id", "api", "movement", "charge", request).with_expires("");
         assert!(challenge.is_expired()); // fail-closed: unparseable → expired
         assert!(challenge.expires_at().is_none());
     }
@@ -1855,7 +1855,7 @@ mod tests {
     fn test_is_expired_whitespace_only() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
         let challenge =
-            PaymentChallenge::new("id", "api", "tempo", "charge", request).with_expires("   ");
+            PaymentChallenge::new("id", "api", "movement", "charge", request).with_expires("   ");
         assert!(challenge.is_expired()); // fail-closed: unparseable → expired
         assert!(challenge.expires_at().is_none());
     }
@@ -1863,7 +1863,7 @@ mod tests {
     #[test]
     fn test_is_expired_unix_epoch() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("1970-01-01T00:00:00Z");
         assert!(challenge.is_expired());
     }
@@ -1871,7 +1871,7 @@ mod tests {
     #[test]
     fn test_is_expired_invalid_month() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2099-13-01T00:00:00Z");
         assert!(challenge.is_expired()); // fail-closed: unparseable → expired
     }
@@ -1879,7 +1879,7 @@ mod tests {
     #[test]
     fn test_is_expired_invalid_day() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2099-01-32T00:00:00Z");
         assert!(challenge.is_expired()); // fail-closed: unparseable → expired
     }
@@ -1887,7 +1887,7 @@ mod tests {
     #[test]
     fn test_is_expired_plain_text() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("just some text");
         assert!(challenge.is_expired()); // fail-closed: unparseable → expired
     }
@@ -1896,67 +1896,67 @@ mod tests {
     fn test_is_expired_numeric_string() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
         let challenge =
-            PaymentChallenge::new("id", "api", "tempo", "charge", request).with_expires("12345");
+            PaymentChallenge::new("id", "api", "movement", "charge", request).with_expires("12345");
         assert!(challenge.is_expired()); // fail-closed: unparseable → expired
     }
 
     #[test]
     fn test_validate_for_charge_valid() {
         let request = Base64UrlJson::from_value(&serde_json::json!({})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request);
-        assert!(challenge.validate_for_charge("tempo").is_ok());
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request);
+        assert!(challenge.validate_for_charge("movement").is_ok());
     }
 
     #[test]
     fn test_validate_for_charge_case_insensitive() {
         let request = Base64UrlJson::from_value(&serde_json::json!({})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request);
-        assert!(challenge.validate_for_charge("TEMPO").is_ok());
-        assert!(challenge.validate_for_charge("Tempo").is_ok());
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request);
+        assert!(challenge.validate_for_charge("MOVEMENT").is_ok());
+        assert!(challenge.validate_for_charge("Movement").is_ok());
     }
 
     #[test]
     fn test_validate_for_charge_wrong_method() {
         let request = Base64UrlJson::from_value(&serde_json::json!({})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request);
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request);
         assert!(challenge.validate_for_charge("stripe").is_err());
     }
 
     #[test]
     fn test_validate_for_charge_wrong_intent() {
         let request = Base64UrlJson::from_value(&serde_json::json!({})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "session", request);
-        assert!(challenge.validate_for_charge("tempo").is_err());
+        let challenge = PaymentChallenge::new("id", "api", "movement", "session", request);
+        assert!(challenge.validate_for_charge("movement").is_err());
     }
 
     #[test]
     fn test_validate_for_charge_expired() {
         let request = Base64UrlJson::from_value(&serde_json::json!({})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
             .with_expires("2020-01-01T00:00:00Z");
-        assert!(challenge.validate_for_charge("tempo").is_err());
+        assert!(challenge.validate_for_charge("movement").is_err());
     }
 
     #[test]
     fn test_validate_for_session_valid() {
         let request = Base64UrlJson::from_value(&serde_json::json!({})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "session", request);
-        assert!(challenge.validate_for_session("tempo").is_ok());
+        let challenge = PaymentChallenge::new("id", "api", "movement", "session", request);
+        assert!(challenge.validate_for_session("movement").is_ok());
     }
 
     #[test]
     fn test_validate_for_session_wrong_intent() {
         let request = Base64UrlJson::from_value(&serde_json::json!({})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "charge", request);
-        assert!(challenge.validate_for_session("tempo").is_err());
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request);
+        assert!(challenge.validate_for_session("movement").is_err());
     }
 
     #[test]
     fn test_validate_for_session_expired() {
         let request = Base64UrlJson::from_value(&serde_json::json!({})).unwrap();
-        let challenge = PaymentChallenge::new("id", "api", "tempo", "session", request)
+        let challenge = PaymentChallenge::new("id", "api", "movement", "session", request)
             .with_expires("2020-01-01T00:00:00Z");
-        assert!(challenge.validate_for_session("tempo").is_err());
+        assert!(challenge.validate_for_session("movement").is_err());
     }
 
     #[test]

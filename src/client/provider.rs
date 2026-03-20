@@ -46,7 +46,7 @@ pub trait PaymentProvider: Clone + Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `method` - Payment method name (e.g., "tempo", "stripe")
+    /// * `method` - Payment method name (e.g., "movement", "stripe")
     /// * `intent` - Payment intent name (e.g., "charge", "authorize")
     ///
     /// # Returns
@@ -74,10 +74,10 @@ pub trait PaymentProvider: Clone + Send + Sync {
 /// # Examples
 ///
 /// ```ignore
-/// use mpp::client::{MultiProvider, TempoProvider};
+/// use mpp::client::{MultiProvider, MovementProvider};
 ///
 /// let provider = MultiProvider::new()
-///     .with(TempoProvider::new(signer, "https://rpc.moderato.tempo.xyz")?);
+///     .with(MovementProvider::new(signer, "https://testnet.movementnetwork.xyz/v1")?);
 ///
 /// // Automatically picks the right provider based on challenge.method
 /// let resp = client.get(url).send_with_payment(&provider).await?;
@@ -205,7 +205,7 @@ mod tests {
     fn test_multi_provider_supports() {
         let multi = MultiProvider::new()
             .with(MockProvider {
-                method: "tempo",
+                method: "movement",
                 intent: "charge",
             })
             .with(MockProvider {
@@ -213,26 +213,26 @@ mod tests {
                 intent: "charge",
             });
 
-        assert!(multi.has_support("tempo", "charge"));
+        assert!(multi.has_support("movement", "charge"));
         assert!(multi.has_support("stripe", "charge"));
         assert!(!multi.has_support("bitcoin", "charge"));
-        assert!(!multi.has_support("tempo", "authorize"));
+        assert!(!multi.has_support("movement", "authorize"));
     }
 
     #[test]
     fn test_multi_provider_empty() {
         let multi = MultiProvider::new();
-        assert!(!multi.has_support("tempo", "charge"));
+        assert!(!multi.has_support("movement", "charge"));
     }
 
     #[test]
     fn test_multi_provider_clone() {
         let multi = MultiProvider::new().with(MockProvider {
-            method: "tempo",
+            method: "movement",
             intent: "charge",
         });
 
         let cloned = multi.clone();
-        assert!(cloned.has_support("tempo", "charge"));
+        assert!(cloned.has_support("movement", "charge"));
     }
 }

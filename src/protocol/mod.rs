@@ -44,7 +44,7 @@
 //! use mpp::protocol::core::*;
 //! use mpp::protocol::intents::ChargeRequest;
 //!
-//! let header = r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJVU0QifQ""#;
+//! let header = r#"Payment id="abc", realm="api", method="movement", intent="charge", request="eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJVU0QifQ""#;
 //! let challenge = parse_www_authenticate(header).unwrap();
 //! if challenge.intent.is_charge() {
 //!     let req: ChargeRequest = challenge.request.decode().unwrap();

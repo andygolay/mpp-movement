@@ -376,7 +376,7 @@ mod tests {
 
         assert!(provider.supports("movement", "session"));
         assert!(!provider.supports("movement", "charge"));
-        assert!(!provider.supports("tempo", "session"));
+        assert!(!provider.supports("other", "session"));
     }
 
     #[test]

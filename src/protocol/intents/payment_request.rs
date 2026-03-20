@@ -107,7 +107,7 @@ mod tests {
         let challenge = PaymentChallenge {
             id: "abc123".to_string(),
             realm: "api.example.com".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request: Base64UrlJson::from_value(&serde_json::json!({
                 "amount": "1000",
@@ -137,7 +137,7 @@ mod tests {
         let challenge = PaymentChallenge {
             id: "abc123".to_string(),
             realm: "api.example.com".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request: Base64UrlJson::from_typed(&request).unwrap(),
             expires: None,

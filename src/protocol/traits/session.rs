@@ -18,7 +18,7 @@ use std::future::Future;
 /// # Intent = Schema, Method = Implementation
 ///
 /// - **Intent** ("session"): Defines the shared schema (`SessionRequest`)
-/// - **Method** (e.g., "tempo"): Implements verification for that schema
+/// - **Method** (e.g., "movement"): Implements verification for that schema
 ///
 /// # Examples
 ///
@@ -52,7 +52,7 @@ use std::future::Future;
 /// }
 /// ```
 pub trait SessionMethod: Clone + Send + Sync {
-    /// Payment method identifier (e.g., "tempo", "stripe", "base").
+    /// Payment method identifier (e.g., "movement", "stripe", "base").
     ///
     /// This should match the `method` field in payment challenges.
     fn method(&self) -> &str;

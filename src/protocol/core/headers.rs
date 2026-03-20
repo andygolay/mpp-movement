@@ -192,7 +192,7 @@ fn is_valid_digest_format(d: &str) -> bool {
 /// ```
 /// use mpp::protocol::core::parse_www_authenticate;
 ///
-/// let header = r#"Payment id="abc123", realm="api", method="tempo", intent="charge", request="eyJhbW91bnQiOiIxMDAwMCJ9""#;
+/// let header = r#"Payment id="abc123", realm="api", method="movement", intent="charge", request="eyJhbW91bnQiOiIxMDAwMCJ9""#;
 /// let challenge = parse_www_authenticate(header).unwrap();
 /// assert_eq!(challenge.id, "abc123");
 /// ```
@@ -300,7 +300,7 @@ pub fn parse_www_authenticate_all<'a>(
 /// let challenge = PaymentChallenge {
 ///     id: "abc123".to_string(),
 ///     realm: "api".to_string(),
-///     method: "tempo".into(),
+///     method: "movement".into(),
 ///     intent: "charge".into(),
 ///     request: Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap(),
 ///     expires: None,
@@ -365,7 +365,7 @@ pub fn format_www_authenticate(challenge: &PaymentChallenge) -> Result<String> {
 /// let challenge = PaymentChallenge {
 ///     id: "abc123".to_string(),
 ///     realm: "api".to_string(),
-///     method: "tempo".into(),
+///     method: "movement".into(),
 ///     intent: "charge".into(),
 ///     request: Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap(),
 ///     expires: None,
@@ -467,7 +467,7 @@ mod tests {
         PaymentChallenge {
             id: "abc123".to_string(),
             realm: "api".to_string(),
-            method: "tempo".into(),
+            method: "movement".into(),
             intent: "charge".into(),
             request: Base64UrlJson::from_value(&serde_json::json!({
                 "amount": "10000",
@@ -489,7 +489,7 @@ mod tests {
 
         assert_eq!(parsed.id, "abc123");
         assert_eq!(parsed.realm, "api");
-        assert_eq!(parsed.method.as_str(), "tempo");
+        assert_eq!(parsed.method.as_str(), "movement");
         assert_eq!(parsed.intent.as_str(), "charge");
         assert_eq!(parsed.expires, Some("2024-01-01T00:00:00Z".to_string()));
 
@@ -501,12 +501,12 @@ mod tests {
     #[test]
     fn test_parse_www_authenticate_case_insensitive() {
         let header =
-            r#"payment id="test", realm="api", method="tempo", intent="charge", request="e30""#;
+            r#"payment id="test", realm="api", method="movement", intent="charge", request="e30""#;
         let parsed = parse_www_authenticate(header).unwrap();
         assert_eq!(parsed.id, "test");
 
         let header2 =
-            r#"PAYMENT id="test2", realm="api", method="tempo", intent="charge", request="e30""#;
+            r#"PAYMENT id="test2", realm="api", method="movement", intent="charge", request="e30""#;
         let parsed2 = parse_www_authenticate(header2).unwrap();
         assert_eq!(parsed2.id, "test2");
     }
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn test_parse_www_authenticate_leading_whitespace() {
         let header =
-            r#"  Payment id="test", realm="api", method="tempo", intent="charge", request="e30""#;
+            r#"  Payment id="test", realm="api", method="movement", intent="charge", request="e30""#;
         let parsed = parse_www_authenticate(header).unwrap();
         assert_eq!(parsed.id, "test");
     }
@@ -535,7 +535,7 @@ mod tests {
     fn test_parse_www_authenticate_all() {
         let headers = vec![
             "Bearer token",
-            r#"Payment id="a", realm="api", method="tempo", intent="charge", request="e30""#,
+            r#"Payment id="a", realm="api", method="movement", intent="charge", request="e30""#,
             "Basic xyz",
             r#"Payment id="b", realm="api", method="base", intent="charge", request="e30""#,
         ];
@@ -589,7 +589,7 @@ mod tests {
     fn test_parse_receipt() {
         let receipt = Receipt {
             status: ReceiptStatus::Success,
-            method: "tempo".into(),
+            method: "movement".into(),
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             reference: "0xabc123".to_string(),
         };
@@ -598,7 +598,7 @@ mod tests {
         let parsed = parse_receipt(&header).unwrap();
 
         assert_eq!(parsed.status, ReceiptStatus::Success);
-        assert_eq!(parsed.method.as_str(), "tempo");
+        assert_eq!(parsed.method.as_str(), "movement");
         assert_eq!(parsed.reference, "0xabc123");
     }
 
@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn test_parse_receipt_invalid_status() {
-        let json = r#"{"status":"failed","method":"tempo","timestamp":"2024-01-01T00:00:00Z","reference":"0xabc"}"#;
+        let json = r#"{"status":"failed","method":"movement","timestamp":"2024-01-01T00:00:00Z","reference":"0xabc"}"#;
         let token = base64url_encode(json.as_bytes());
         let result = parse_receipt(&token);
         assert!(result.is_err());
@@ -720,14 +720,14 @@ mod tests {
 
     #[test]
     fn test_parse_www_authenticate_invalid_digest_format() {
-        let header = r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="e30", digest="invalid-digest-format""#;
+        let header = r#"Payment id="abc", realm="api", method="movement", intent="charge", request="e30", digest="invalid-digest-format""#;
         let result = parse_www_authenticate(header);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_www_authenticate_rejects_non_sha256_digest() {
-        let header = r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="e30", digest="sha-512=abc""#;
+        let header = r#"Payment id="abc", realm="api", method="movement", intent="charge", request="e30", digest="sha-512=abc""#;
         let result = parse_www_authenticate(header);
         assert!(result.is_err());
     }
@@ -735,7 +735,7 @@ mod tests {
     #[test]
     fn test_parse_www_authenticate_invalid_request_json() {
         // "not json" base64url-encoded is "bm90IGpzb24"
-        let header = r#"Payment id="abc", realm="api", method="tempo", intent="charge", request="bm90IGpzb24""#;
+        let header = r#"Payment id="abc", realm="api", method="movement", intent="charge", request="bm90IGpzb24""#;
         let result = parse_www_authenticate(header);
         assert!(result.is_err());
     }
@@ -808,7 +808,7 @@ mod tests {
 
     #[test]
     fn test_parse_www_authenticate_rejects_duplicate_params() {
-        let header = r#"Payment id="a", realm="api", method="tempo", intent="charge", request="e30", id="b""#;
+        let header = r#"Payment id="a", realm="api", method="movement", intent="charge", request="e30", id="b""#;
         let err = parse_www_authenticate(header).unwrap_err();
         assert!(err.to_string().contains("Duplicate parameter"));
     }
@@ -816,7 +816,7 @@ mod tests {
     #[test]
     fn test_parse_www_authenticate_rejects_empty_id() {
         let header =
-            r#"Payment id="", realm="api", method="tempo", intent="charge", request="e30""#;
+            r#"Payment id="", realm="api", method="movement", intent="charge", request="e30""#;
         let err = parse_www_authenticate(header).unwrap_err();
         assert!(err.to_string().contains("Empty 'id'"));
     }
@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn test_parse_receipt_rejects_non_iso8601_timestamp() {
-        // {"method":"tempo","reference":"0xabc","status":"success","timestamp":"Jan 29 2026 12:00"}
+        // {"method":"movement","reference":"0xabc","status":"success","timestamp":"Jan 29 2026 12:00"}
         // base64url encoded
         let wire = "eyJtZXRob2QiOiJ0ZW1wbyIsInJlZmVyZW5jZSI6IjB4YWJjIiwic3RhdHVzIjoic3VjY2VzcyIsInRpbWVzdGFtcCI6IkphbiAyOSAyMDI2IDEyOjAwIn0";
         let err = parse_receipt(wire).unwrap_err();

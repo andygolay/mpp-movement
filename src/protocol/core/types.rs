@@ -12,7 +12,7 @@ use crate::error::{MppError, Result};
 
 /// Payment method identifier (newtype over String).
 ///
-/// Represents a payment method like "tempo", "base", "stripe", etc.
+/// Represents a payment method like "movement", "base", "stripe", etc.
 /// Per spec, method identifiers MUST be lowercase ASCII strings.
 /// This type validates and normalizes to lowercase on creation.
 ///
@@ -21,12 +21,12 @@ use crate::error::{MppError, Result};
 /// ```
 /// use mpp::protocol::core::MethodName;
 ///
-/// let method: MethodName = "tempo".into();
-/// assert_eq!(method.as_str(), "tempo");
+/// let method: MethodName = "movement".into();
+/// assert_eq!(method.as_str(), "movement");
 ///
 /// // Uppercase input is normalized to lowercase
-/// let method2: MethodName = "TEMPO".into();
-/// assert_eq!(method2.as_str(), "tempo");
+/// let method2: MethodName = "MOVEMENT".into();
+/// assert_eq!(method2.as_str(), "movement");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -356,21 +356,21 @@ mod tests {
 
     #[test]
     fn test_method_name() {
-        let method: MethodName = "tempo".into();
-        assert_eq!(method.as_str(), "tempo");
-        assert!(method.eq_ignore_ascii_case("TEMPO"));
-        assert_eq!(method.to_string(), "tempo");
+        let method: MethodName = "movement".into();
+        assert_eq!(method.as_str(), "movement");
+        assert!(method.eq_ignore_ascii_case("MOVEMENT"));
+        assert_eq!(method.to_string(), "movement");
         assert!(method.is_valid());
     }
 
     #[test]
     fn test_method_name_normalizes_to_lowercase() {
         // Per spec, method identifiers MUST be lowercase
-        let method: MethodName = "TEMPO".into();
-        assert_eq!(method.as_str(), "tempo");
+        let method: MethodName = "MOVEMENT".into();
+        assert_eq!(method.as_str(), "movement");
 
-        let method2 = MethodName::new("TeMpO");
-        assert_eq!(method2.as_str(), "tempo");
+        let method2 = MethodName::new("MoVeMeNt");
+        assert_eq!(method2.as_str(), "movement");
     }
 
     #[test]

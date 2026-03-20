@@ -378,7 +378,7 @@ mod tests {
         );
         assert!(provider.supports("movement", "charge"));
         assert!(provider.supports("movement", "session"));
-        assert!(!provider.supports("tempo", "charge"));
+        assert!(!provider.supports("other", "charge"));
         assert!(!provider.supports("movement", "authorize"));
     }
 

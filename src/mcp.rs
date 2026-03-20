@@ -37,7 +37,7 @@
 //!
 //! // Build a payment-required error
 //! let challenge = PaymentChallenge::new(
-//!     "ch_123", "api.example.com", "tempo", "charge",
+//!     "ch_123", "api.example.com", "movement", "charge",
 //!     mpp::Base64UrlJson::from_value(&json!({"amount": "1000"})).unwrap(),
 //! );
 //! let error = mcp::payment_required_error(&challenge);
@@ -193,7 +193,7 @@ mod tests {
         PaymentChallenge::new(
             "ch_test_123",
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             Base64UrlJson::from_value(&json!({"amount": "1000", "currency": "USD"})).unwrap(),
         )
@@ -204,7 +204,7 @@ mod tests {
             ChallengeEcho {
                 id: "ch_test_123".to_string(),
                 realm: "api.example.com".to_string(),
-                method: "tempo".into(),
+                method: "movement".into(),
                 intent: "charge".into(),
                 request: Base64UrlJson::from_raw("eyJhbW91bnQiOiIxMDAwIn0"),
                 expires: None,
@@ -217,7 +217,7 @@ mod tests {
     }
 
     fn test_receipt() -> Receipt {
-        Receipt::success("tempo", "0xtxhash123")
+        Receipt::success("movement", "0xtxhash123")
     }
 
     // ---- McpPaymentError serde round-trip ----
@@ -300,7 +300,7 @@ mod tests {
         let data = error.data.as_ref().unwrap();
         assert_eq!(data.http_status, 402);
         assert_eq!(data.challenges.len(), 1);
-        assert_eq!(data.challenges[0].method.as_str(), "tempo");
+        assert_eq!(data.challenges[0].method.as_str(), "movement");
         assert_eq!(data.challenges[0].intent.as_str(), "charge");
     }
 
@@ -315,7 +315,7 @@ mod tests {
         let meta = result.get("_meta").unwrap();
         let mcp_receipt = meta.get(RECEIPT_META_KEY).unwrap();
         assert_eq!(mcp_receipt["status"], "success");
-        assert_eq!(mcp_receipt["method"], "tempo");
+        assert_eq!(mcp_receipt["method"], "movement");
         assert_eq!(mcp_receipt["reference"], "0xtxhash123");
         assert_eq!(mcp_receipt["challengeId"], "ch_test_123");
     }
@@ -492,7 +492,7 @@ mod tests {
 
         // Flattened fields
         assert_eq!(json["status"], "success");
-        assert_eq!(json["method"], "tempo");
+        assert_eq!(json["method"], "movement");
         assert_eq!(json["challengeId"], "ch_abc");
 
         let parsed: McpReceipt = serde_json::from_value(json).unwrap();
@@ -510,7 +510,7 @@ mod tests {
         let challenge = PaymentChallenge::with_secret_key(
             secret,
             "api.example.com",
-            "tempo",
+            "movement",
             "charge",
             Base64UrlJson::from_value(&json!({"amount": "1000", "currency": "USD"})).unwrap(),
         );
@@ -527,7 +527,7 @@ mod tests {
         let challenges = extract_challenges(&error_json).unwrap();
         assert_eq!(challenges.len(), 1);
         assert_eq!(challenges[0].id, challenge.id);
-        assert_eq!(challenges[0].method.as_str(), "tempo");
+        assert_eq!(challenges[0].method.as_str(), "movement");
         assert_eq!(challenges[0].intent.as_str(), "charge");
 
         // 5. Client "pays" — build credential from echoed challenge
@@ -568,14 +568,14 @@ mod tests {
         assert!(echoed_challenge.verify(secret));
 
         // 9. Server creates receipt and attaches to result
-        let receipt = Receipt::success("tempo", "0xtxhash_roundtrip");
+        let receipt = Receipt::success("movement", "0xtxhash_roundtrip");
         let mut result = json!({"content": [{"type": "text", "text": "paid response"}]});
         attach_receipt(&mut result, &receipt, &challenge.id);
 
         // 10. Assert final result has receipt in _meta
         let receipt_value = &result["_meta"][RECEIPT_META_KEY];
         assert_eq!(receipt_value["status"], "success");
-        assert_eq!(receipt_value["method"], "tempo");
+        assert_eq!(receipt_value["method"], "movement");
         assert_eq!(receipt_value["reference"], "0xtxhash_roundtrip");
         assert_eq!(receipt_value["challengeId"], challenge.id);
         // Original content preserved
