@@ -33,8 +33,10 @@ export function CallerPanel() {
 
   const formatAmount = useCallback(
     (amount: bigint) => {
-      const divisor = 10 ** TOKEN_DECIMALS;
-      return (Number(amount) / divisor).toFixed(TOKEN_DECIMALS);
+      const divisor = BigInt(10 ** TOKEN_DECIMALS);
+      const whole = amount / divisor;
+      const frac = amount % divisor;
+      return `${whole}.${frac.toString().padStart(TOKEN_DECIMALS, "0")}`;
     },
     [],
   );

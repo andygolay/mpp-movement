@@ -122,8 +122,17 @@ struct GoLiveRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GoOfflineRequest {
     address: String,
+    /// Ed25519 signature proving wallet ownership (hex-encoded).
+    signature: String,
+    /// The full message that was signed (wallet-prefixed).
+    full_message: String,
+    /// Nonce (timestamp) to prevent replay.
+    nonce: String,
+    /// Ed25519 public key (hex-encoded, 0x-prefixed).
+    pubkey: String,
 }
 
 #[derive(Deserialize)]
@@ -144,6 +153,10 @@ struct StartCallBody {
 #[serde(rename_all = "camelCase")]
 struct HangupRequest {
     call_id: String,
+    /// Address of the party hanging up (caller or host).
+    address: String,
+    /// HMAC token proving the caller/host identity.
+    token: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -232,11 +245,13 @@ async fn main() {
         .layer(cors)
         .with_state(state.clone());
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3002")
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3002".to_string());
+    let bind_addr = format!("0.0.0.0:{port}");
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
         .expect("failed to bind");
 
-    info!("Voice Call Server listening on http://localhost:3002");
+    info!("Voice Call Server listening on http://localhost:{port}");
     if allowed_origins.is_some() {
         info!(origins = %allowed_origins.as_deref().unwrap(), "CORS restricted");
     } else {
@@ -493,9 +508,15 @@ fn generate_ws_token(secret: &str, call_id: &str, address: &str) -> String {
 }
 
 fn verify_ws_token(secret: &str, call_id: &str, address: &str, token: &str) -> bool {
-    let expected = generate_ws_token(secret, call_id, address);
-    // Constant-time comparison
-    expected == token
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC key length is always valid");
+    mac.update(format!("ws:{call_id}:{address}").as_bytes());
+    let token_bytes = match hex::decode(token) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    // Constant-time comparison via hmac::Mac::verify
+    mac.verify_slice(&token_bytes).is_ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -577,11 +598,26 @@ async fn go_offline(
     State(state): State<Arc<AppState>>,
     Json(body): Json<GoOfflineRequest>,
 ) -> impl IntoResponse {
+    if let Err(e) = verify_go_live_signature(
+        &body.address,
+        &body.full_message,
+        &body.nonce,
+        &body.signature,
+        &body.pubkey,
+    ) {
+        warn!("Host go-offline rejected for {}: {}", body.address, e);
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response();
+    }
+
     if let Some(mut host) = state.hosts.get_mut(&body.address) {
         host.online = false;
         info!("Host offline: {}", body.address);
     }
-    StatusCode::OK
+    StatusCode::OK.into_response()
 }
 
 /// GET /api/hosts
@@ -740,9 +776,14 @@ async fn start_call(
 
 /// GET /api/host/poll?address=0x... -- Check if there's an incoming call for this host.
 async fn host_poll(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<AppState>>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
+    if !check_rate_limit(&state, &addr.ip().to_string()) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({ "error": "Rate limit exceeded" }))).into_response();
+    }
+
     let address = match params.get("address") {
         Some(a) => a,
         None => {
@@ -911,6 +952,15 @@ async fn hangup(
     State(state): State<Arc<AppState>>,
     Json(body): Json<HangupRequest>,
 ) -> impl IntoResponse {
+    // Verify the caller/host identity via HMAC token.
+    if !verify_ws_token(&state.secret_key, &body.call_id, &body.address, &body.token) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "Invalid hangup token" })),
+        )
+            .into_response();
+    }
+
     let call = match state.calls.remove(&body.call_id) {
         Some((_, c)) => c,
         None => {

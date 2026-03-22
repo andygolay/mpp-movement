@@ -31,6 +31,7 @@ export function HostPanel() {
   const [earnings, setEarnings] = useState(0n);
   const [error, setError] = useState("");
   const callIdRef = useRef<string>("");
+  const wsTokenRef = useRef<string>("");
 
   const signalingRef = useRef<SignalingConnection | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -76,8 +77,10 @@ export function HostPanel() {
 
   const formatAmount = useCallback(
     (amount: bigint) => {
-      const divisor = 10 ** TOKEN_DECIMALS;
-      return (Number(amount) / divisor).toFixed(TOKEN_DECIMALS);
+      const divisor = BigInt(10 ** TOKEN_DECIMALS);
+      const whole = amount / divisor;
+      const frac = amount % divisor;
+      return `${whole}.${frac.toString().padStart(TOKEN_DECIMALS, "0")}`;
     },
     [],
   );
@@ -112,22 +115,9 @@ export function HostPanel() {
     }
   }, []);
 
-  // Go offline when the page unloads (tab close, refresh, navigate away)
-  useEffect(() => {
-    if (status !== "online" || !account) return;
-
-    const goOfflineOnUnload = () => {
-      fetch(`${SERVER_URL}/api/host/go-live`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: account.address.toString() }),
-        keepalive: true, // ensures the request completes even during page unload
-      }).catch(() => {});
-    };
-
-    window.addEventListener("beforeunload", goOfflineOnUnload);
-    return () => window.removeEventListener("beforeunload", goOfflineOnUnload);
-  }, [status, account]);
+  // Note: we can't sign a message during page unload (wallet prompts won't work),
+  // so we rely on the server's stale host sweep (marks hosts offline after 2 min
+  // without a poll) instead of sending a DELETE on beforeunload.
 
   // Poll for incoming calls when online
   useEffect(() => {
@@ -214,13 +204,27 @@ export function HostPanel() {
     }
 
     try {
-      await fetch(`${SERVER_URL}/api/host/go-live`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          address: account?.address?.toString(),
-        }),
-      });
+      if (account) {
+        const nonce = Date.now().toString();
+        const message = `voice-call-go-offline:${account.address}:${nonce}`;
+        const signResult = await signMessage({ message, nonce });
+        const signature = typeof signResult.signature === "string"
+          ? signResult.signature
+          : signResult.signature.toString();
+        const pubkey = account.publicKey.toString();
+
+        await fetch(`${SERVER_URL}/api/host/go-live`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            address: account.address.toString(),
+            signature,
+            fullMessage: signResult.fullMessage,
+            nonce,
+            pubkey,
+          }),
+        });
+      }
     } catch {
       // best-effort
     }
@@ -236,6 +240,7 @@ export function HostPanel() {
     setStatus("in_call");
     statusRef.current = "in_call";
     callIdRef.current = callId;
+    wsTokenRef.current = wsToken;
     highestVoucherRef.current = null;
     saveVoucher(null);
     setCallerAddress(caller);
@@ -451,17 +456,22 @@ export function HostPanel() {
         await fetch(`${SERVER_URL}/api/call/hangup`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ callId: callIdRef.current }),
+          body: JSON.stringify({
+            callId: callIdRef.current,
+            address: account?.address?.toString() ?? "",
+            token: wsTokenRef.current,
+          }),
         });
       }
     } catch {
       // best effort
     }
     callIdRef.current = "";
+    wsTokenRef.current = "";
 
     if (settled) {
       highestVoucherRef.current = null;
-    saveVoucher(null);
+      saveVoucher(null);
       setStatus("online");
       statusRef.current = "online";
       setCallerAddress("");
@@ -482,7 +492,7 @@ export function HostPanel() {
     const settled = await settleOnChain();
     if (settled) {
       highestVoucherRef.current = null;
-    saveVoucher(null);
+      saveVoucher(null);
       setStatus("online");
       statusRef.current = "online";
       setCallerAddress("");

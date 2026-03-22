@@ -64,6 +64,7 @@ export function useCall(): CallResult {
   const voucherIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callIdRef = useRef<string>("");
+  const callerTokenRef = useRef<string>("");
   const hostAddressRef = useRef<string>("");
   const rateRef = useRef<bigint>(0n);
   const callStateRef = useRef<CallState>("idle");
@@ -216,6 +217,7 @@ export function useCall(): CallResult {
         const callData = await retryResp.json();
         const callId = callData.callId;
         callIdRef.current = callId;
+        callerTokenRef.current = callData.callerToken;
 
         setCallState("ringing");
         callStateRef.current = "ringing";
@@ -459,12 +461,17 @@ export function useCall(): CallResult {
       await fetch(`${SERVER_URL}/api/call/hangup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callId: callIdRef.current }),
+        body: JSON.stringify({
+          callId: callIdRef.current,
+          address: account?.address?.toString() ?? "",
+          token: callerTokenRef.current,
+        }),
       });
     } catch {
       // Best-effort hangup notification
     }
 
+    callerTokenRef.current = "";
     setCallState("ended");
     callStateRef.current = "ended";
   }

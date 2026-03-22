@@ -169,6 +169,7 @@ See `server/.env.example` for the full list.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `SECRET_KEY` | **Yes** | _(none)_ | HMAC secret for payment challenges and WebSocket auth. Generate with `openssl rand -base64 32` |
+| `PORT` | No | `3002` | HTTP listen port |
 | `MODULE_ADDRESS` | No | `0x74f1060...b1e8` | MovementStreamChannel module address |
 | `REST_URL` | No | `https://testnet.movementnetwork.xyz/v1` | Movement REST API |
 | `ALLOWED_ORIGINS` | No | _(all origins)_ | Comma-separated CORS origins (e.g. `https://your-app.vercel.app`) |
