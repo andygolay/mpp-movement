@@ -5,18 +5,21 @@ Deploy the voice-call example for real users on different networks.
 ## Architecture
 
 ```
-Vercel (free) ─── React client (static)
+Client (your domain) ─── React app (static hosting)
    │
    └──▶ DigitalOcean VPS ($6/mo) ─── Caddy (reverse proxy + TLS)
                                   ─── Rust signaling server (:3002)
                                   ─── coturn TURN server (:3478)
 ```
 
+You need two domains:
+- **Client**: wherever you host the React app (you already have this)
+- **Server**: one subdomain on any domain you control, e.g. `api.yourdomain.com` — handles the API, WebSocket signaling, and TURN relay all on one VPS
+
 ## What You Need
 
-- A domain name (any registrar, ~$10/year)
+- A domain you can add an A record to (for the server subdomain)
 - A DigitalOcean account (or any VPS provider)
-- A Vercel account (free)
 - This repo pushed to GitHub
 
 ## Step 1: Create the VPS
@@ -31,16 +34,15 @@ Vercel (free) ─── React client (static)
 4. Click **Create Droplet**
 5. Copy the IP address it gives you (e.g. `164.90.xxx.xxx`)
 
-## Step 2: Point Your Domain at the VPS
+## Step 2: Point a Subdomain at the VPS
 
-In your domain registrar's DNS settings, add two A records:
+In your domain registrar's DNS settings, add one A record:
 
 | Type | Name | Value |
 |------|------|-------|
 | A | `api` | `164.90.xxx.xxx` (your VPS IP) |
-| A | `turn` | `164.90.xxx.xxx` (same IP) |
 
-This gives you `api.yourdomain.com` and `turn.yourdomain.com`. Replace `yourdomain.com` with your actual domain throughout this guide.
+This gives you `api.yourdomain.com`. Replace `yourdomain.com` with your actual domain throughout this guide. This single subdomain handles the HTTP API, WebSocket signaling, and TURN relay.
 
 DNS can take a few minutes to propagate. You can check with:
 
@@ -143,7 +145,7 @@ sudo tee /etc/turnserver.conf << 'EOF'
 listening-port=3478
 tls-listening-port=5349
 realm=yourdomain.com
-server-name=turn.yourdomain.com
+server-name=api.yourdomain.com
 
 # Authentication
 lt-cred-mech
@@ -217,7 +219,7 @@ MODULE_ADDRESS=0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e
 REST_URL=https://testnet.movementnetwork.xyz/v1
 
 # Security — restrict to your client domain(s)
-ALLOWED_ORIGINS=https://your-app.vercel.app
+ALLOWED_ORIGINS=https://your-client-domain.com
 
 # Logging
 RUST_LOG=info
@@ -232,7 +234,7 @@ SECRET=$(openssl rand -base64 32)
 sed -i "s|CHANGE_THIS|$SECRET|" /home/deploy/mpp-movement/.env.production
 ```
 
-**Edit the file** to set your actual `ALLOWED_ORIGINS` (your Vercel domain):
+**Edit the file** to set your actual `ALLOWED_ORIGINS` (your client domain):
 
 ```bash
 nano /home/deploy/mpp-movement/.env.production
@@ -324,37 +326,43 @@ curl https://api.yourdomain.com/health
 
 If that works, your server is live with HTTPS. Caddy handles WebSocket proxying automatically.
 
-## Step 7: Deploy the Client on Vercel
+## Step 7: Deploy the Client
 
-1. Go to [vercel.com](https://vercel.com/), sign in with GitHub
-2. Click **Add New → Project**, import your `mpp-movement` repo
-3. Configure the build:
+Build the client with your production environment variables:
 
-| Setting | Value |
-|---------|-------|
-| **Framework Preset** | Vite |
-| **Root Directory** | `.` (leave as repo root) |
-| **Build Command** | `cd ts/client && pnpm install && pnpm build && cd ../../examples/voice-call/client && pnpm install && pnpm build` |
-| **Output Directory** | `examples/voice-call/client/dist` |
+```bash
+cd examples/voice-call/client
+cp .env.example .env
+```
 
-4. Add environment variables:
+Edit `.env` with your production values:
 
 | Variable | Value |
 |----------|-------|
 | `VITE_SERVER_URL` | `https://api.yourdomain.com` |
 | `VITE_MODULE_ADDRESS` | `0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8` |
-| `VITE_TURN_URL` | `turn:turn.yourdomain.com:3478` |
+| `VITE_TURN_URL` | `turn:api.yourdomain.com:3478` |
 | `VITE_TURN_USERNAME` | `voicecall` |
 | `VITE_TURN_CREDENTIAL` | (the coturn password you set in Step 4) |
 
-5. Click **Deploy**
-
-Once deployed, Vercel gives you a URL like `your-project.vercel.app`. That's your live app.
-
-**Important:** Go back to your server's `.env.production` and set `ALLOWED_ORIGINS` to your Vercel URL, then restart the server:
+Then build:
 
 ```bash
-# Edit .env.production to set ALLOWED_ORIGINS=https://your-project.vercel.app
+# Build the @mpp/client dependency first (local workspace package)
+cd ../../../ts/client && pnpm install && pnpm build
+
+# Build the voice-call client
+cd ../../examples/voice-call/client
+pnpm install
+pnpm build
+```
+
+This produces a `dist/` folder with static files. Deploy them however you host your client (Vercel, Netlify, Cloudflare Pages, nginx, etc.).
+
+**Important:** Set `ALLOWED_ORIGINS` on the server to your client's domain, then restart:
+
+```bash
+# Edit .env.production to set ALLOWED_ORIGINS=https://your-client-domain.com
 nano /home/deploy/mpp-movement/.env.production
 sudo systemctl restart voice-call-server
 ```
@@ -417,7 +425,7 @@ cargo build --release --bin voice-call-server
 sudo systemctl restart voice-call-server
 ```
 
-The Vercel client redeploys automatically on git push.
+Rebuild and redeploy the client if it changed.
 
 ## Troubleshooting
 
@@ -443,7 +451,7 @@ dig api.yourdomain.com
 ```
 The IP should match your VPS. Also make sure ports 80 and 443 are open.
 
-**Vercel build fails**: The most likely issue is the `@mpp/client` build. Check the Vercel build logs — if `ts/client` fails to build, make sure its `tsconfig.json` and dependencies are correct.
+**Client build fails**: The most likely issue is the `@mpp/client` dependency. Make sure `ts/client` builds successfully first (`cd ts/client && pnpm build`).
 
 **Rust build runs out of memory on 1 GB VPS**: Make sure you set up swap (Step 3d). Alternatively, build locally and copy the binary:
 ```bash
