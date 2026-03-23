@@ -75,10 +75,7 @@ impl ChargeMethod {
         })?;
 
         // Check if pending
-        let tx_type = body
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let tx_type = body.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if tx_type == "pending_transaction" {
             return Err(VerificationError::pending(
                 "transaction is pending confirmation",
@@ -86,7 +83,10 @@ impl ChargeMethod {
         }
 
         // Check success
-        let success = body.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+        let success = body
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !success {
             let vm_status = body
                 .get("vm_status")
@@ -99,9 +99,9 @@ impl ChargeMethod {
         }
 
         // Verify transfer events match the expected values.
-        let expected_amount = request.amount_u64().map_err(|e| {
-            VerificationError::invalid_amount(format!("invalid amount: {}", e))
-        })?;
+        let expected_amount = request
+            .amount_u64()
+            .map_err(|e| VerificationError::invalid_amount(format!("invalid amount: {}", e)))?;
         let expected_recipient = request.recipient_str().map_err(|e| {
             VerificationError::invalid_recipient(format!("invalid recipient: {}", e))
         })?;
@@ -115,21 +115,28 @@ impl ChargeMethod {
         // Movement uses Aptos events: CoinStore::WithdrawEvent, CoinStore::DepositEvent,
         // or fungible_asset::Deposit/Withdraw events.
         if let Some(events) = body.get("events").and_then(|v| v.as_array()) {
-            let transfer_verified = self.verify_transfer_events(
-                events,
-                expected_recipient,
-                expected_amount,
-            );
+            let transfer_verified =
+                self.verify_transfer_events(events, expected_recipient, expected_amount);
 
             if !transfer_verified {
                 // If we can't find matching events, check the payload as a fallback.
                 // The transaction may use `aptos_account::transfer` which combines
                 // coin registration + transfer atomically.
-                self.verify_payload_fallback(&body, expected_currency, expected_recipient, expected_amount)?;
+                self.verify_payload_fallback(
+                    &body,
+                    expected_currency,
+                    expected_recipient,
+                    expected_amount,
+                )?;
             }
         } else {
             // No events field — verify via payload
-            self.verify_payload_fallback(&body, expected_currency, expected_recipient, expected_amount)?;
+            self.verify_payload_fallback(
+                &body,
+                expected_currency,
+                expected_recipient,
+                expected_amount,
+            )?;
         }
 
         Ok(Receipt::success(super::METHOD_NAME, tx_hash))
@@ -150,10 +157,7 @@ impl ChargeMethod {
         let recipient_normalized = normalize_address(expected_recipient);
 
         for event in events {
-            let event_type = event
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
             // Check for deposit/transfer events from both coin and FA systems
             let is_deposit = event_type.contains("::coin::DepositEvent")
@@ -187,9 +191,7 @@ impl ChargeMethod {
             // For deposit events, check various address fields
             // Coin events: guid.account_address
             if let Some(guid) = event.get("guid") {
-                if let Some(account_address) = guid
-                    .get("account_address")
-                    .and_then(|v| v.as_str())
+                if let Some(account_address) = guid.get("account_address").and_then(|v| v.as_str())
                 {
                     if normalize_address(account_address) == recipient_normalized {
                         return true;
@@ -234,9 +236,7 @@ impl ChargeMethod {
         match function {
             // FA transfer: first argument is the metadata address — must match currency
             "0x1::primary_fungible_store::transfer" => {
-                let arguments = payload
-                    .get("arguments")
-                    .and_then(|v| v.as_array());
+                let arguments = payload.get("arguments").and_then(|v| v.as_array());
                 if let Some(args) = arguments {
                     if let Some(metadata) = args.first().and_then(|v| v.as_str()) {
                         if normalize_address(metadata) != normalize_address(expected_currency) {
@@ -267,9 +267,7 @@ impl ChargeMethod {
                 // that native MOVE is not used for a non-MOVE currency request.
                 if is_native_move(expected_currency) {
                     // Expecting native MOVE — type arg should be AptosCoin
-                    let type_args = payload
-                        .get("type_arguments")
-                        .and_then(|v| v.as_array());
+                    let type_args = payload.get("type_arguments").and_then(|v| v.as_array());
                     if let Some(args) = type_args {
                         let has_aptos_coin = args.iter().any(|a| {
                             a.as_str()
@@ -314,9 +312,9 @@ impl ChargeMethod {
         expected_recipient: &str,
         expected_amount: u64,
     ) -> Result<(), VerificationError> {
-        let payload = tx.get("payload").ok_or_else(|| {
-            VerificationError::new("transaction has no payload")
-        })?;
+        let payload = tx
+            .get("payload")
+            .ok_or_else(|| VerificationError::new("transaction has no payload"))?;
 
         let function = payload
             .get("function")
@@ -462,14 +460,8 @@ mod tests {
 
     #[test]
     fn test_normalize_address() {
-        assert_eq!(
-            normalize_address("0xa"),
-            format!("{:0>64}", "a")
-        );
-        assert_eq!(
-            normalize_address("0xABCD"),
-            format!("{:0>64}", "abcd")
-        );
+        assert_eq!(normalize_address("0xa"), format!("{:0>64}", "a"));
+        assert_eq!(normalize_address("0xABCD"), format!("{:0>64}", "abcd"));
         let full = format!("0x{}", "ab".repeat(32));
         assert_eq!(normalize_address(&full), "ab".repeat(32));
     }
@@ -480,7 +472,8 @@ mod tests {
         assert_eq!(ChargeMethodTrait::method(&method), "movement");
     }
 
-    const USDC_METADATA: &str = "0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6";
+    const USDC_METADATA: &str =
+        "0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6";
 
     #[test]
     fn test_verify_payload_fallback_native_transfer() {

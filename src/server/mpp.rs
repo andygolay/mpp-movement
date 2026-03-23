@@ -390,10 +390,7 @@ impl<S> Mpp<super::MovementChargeMethod, S> {
     ///
     /// Requires currency and recipient to be bound (via [`Mpp::create_movement()`]).
     /// The amount is automatically converted from dollars to base units.
-    pub fn movement_charge(
-        &self,
-        amount: &str,
-    ) -> Result<crate::protocol::core::PaymentChallenge> {
+    pub fn movement_charge(&self, amount: &str) -> Result<crate::protocol::core::PaymentChallenge> {
         self.movement_charge_with_options(amount, super::ChargeOptions::default())
     }
 

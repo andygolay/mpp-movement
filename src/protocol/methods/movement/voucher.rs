@@ -3,7 +3,7 @@
 //! Movement uses ed25519 signatures over BCS-serialized vouchers, matching
 //! the on-chain MovementStreamChannel Move contract.
 
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey, Signature, Verifier};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha3::{Digest, Sha3_256};
 
 /// BCS-serialize a voucher to match the on-chain Voucher struct.
@@ -204,13 +204,7 @@ mod tests {
         let channel_id = [0xAB_u8; 32];
         let sig = sign_voucher(&signing_key, &channel_id, 5000);
 
-        assert!(!verify_voucher(
-            &channel_id,
-            5000,
-            &sig,
-            &wrong_pubkey,
-            &[],
-        ));
+        assert!(!verify_voucher(&channel_id, 5000, &sig, &wrong_pubkey, &[],));
     }
 
     #[test]

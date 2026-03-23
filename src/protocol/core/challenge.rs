@@ -1803,8 +1803,8 @@ mod tests {
     #[test]
     fn test_expires_at_invalid() {
         let request = Base64UrlJson::from_value(&serde_json::json!({"amount": "1000"})).unwrap();
-        let challenge =
-            PaymentChallenge::new("id", "api", "movement", "charge", request).with_expires("garbage");
+        let challenge = PaymentChallenge::new("id", "api", "movement", "charge", request)
+            .with_expires("garbage");
         assert!(challenge.expires_at().is_none());
     }
 

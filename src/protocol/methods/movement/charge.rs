@@ -38,9 +38,9 @@ impl MovementChargeExt for ChargeRequest {
     }
 
     fn recipient_str(&self) -> Result<&str> {
-        self.recipient.as_deref().ok_or_else(|| {
-            MppError::invalid_challenge_reason("No recipient specified".to_string())
-        })
+        self.recipient
+            .as_deref()
+            .ok_or_else(|| MppError::invalid_challenge_reason("No recipient specified".to_string()))
     }
 
     fn currency_str(&self) -> &str {
@@ -88,8 +88,7 @@ mod tests {
             amount: "1000000".to_string(),
             currency: "0xa".to_string(),
             recipient: Some(
-                "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8"
-                    .to_string(),
+                "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8".to_string(),
             ),
             description: None,
             external_id: None,

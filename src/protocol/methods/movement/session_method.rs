@@ -267,7 +267,10 @@ pub async fn verify_transaction_on_chain(
             VerificationError::network_error(format!("failed to parse transaction info: {}", e))
         })?;
 
-        let success = body.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+        let success = body
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let vm_status = body
             .get("vm_status")
             .and_then(|v| v.as_str())
@@ -280,10 +283,7 @@ pub async fn verify_transaction_on_chain(
             .to_string();
 
         // Check if it's still pending (type == "pending_transaction")
-        let tx_type = body
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let tx_type = body.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if tx_type == "pending_transaction" {
             return Err(VerificationError::pending(
                 "transaction is pending confirmation",
@@ -329,12 +329,10 @@ pub async fn get_on_chain_channel(
     {
         let url = format!("{}/view", rest_url.trim_end_matches('/'));
 
-        let channel_id_bytes: Vec<u8> = hex::decode(
-            channel_id_hex.strip_prefix("0x").unwrap_or(channel_id_hex),
-        )
-        .map_err(|e| {
-            VerificationError::invalid_payload(format!("invalid channel ID hex: {}", e))
-        })?;
+        let channel_id_bytes: Vec<u8> =
+            hex::decode(channel_id_hex.strip_prefix("0x").unwrap_or(channel_id_hex)).map_err(
+                |e| VerificationError::invalid_payload(format!("invalid channel ID hex: {}", e)),
+            )?;
 
         let body = serde_json::json!({
             "function": format!("{}::channel::get_channel", module_address),
@@ -346,12 +344,8 @@ pub async fn get_on_chain_channel(
         });
 
         let client = reqwest::Client::new();
-        let resp = client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
+        let resp =
+            client.post(&url).json(&body).send().await.map_err(|e| {
                 VerificationError::network_error(format!("REST request failed: {}", e))
             })?;
 
@@ -379,18 +373,9 @@ pub async fn get_on_chain_channel(
             payer: result[0].as_str().unwrap_or("").to_string(),
             payee: result[1].as_str().unwrap_or("").to_string(),
             token: result[2].as_str().unwrap_or("").to_string(),
-            deposit: result[3]
-                .as_str()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-            settled: result[4]
-                .as_str()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-            close_requested_at: result[5]
-                .as_str()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
+            deposit: result[3].as_str().and_then(|s| s.parse().ok()).unwrap_or(0),
+            settled: result[4].as_str().and_then(|s| s.parse().ok()).unwrap_or(0),
+            close_requested_at: result[5].as_str().and_then(|s| s.parse().ok()).unwrap_or(0),
             finalized: result[6].as_bool().unwrap_or(false),
         })
     }
@@ -483,24 +468,22 @@ impl SessionMethod {
 
     fn parse_hex_bytes(hex_str: &str) -> Result<Vec<u8>, VerificationError> {
         let s = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-        hex::decode(s).map_err(|e| {
-            VerificationError::invalid_payload(format!("invalid hex: {}", e))
-        })
+        hex::decode(s)
+            .map_err(|e| VerificationError::invalid_payload(format!("invalid hex: {}", e)))
     }
 
-    fn resolve_details(
-        &self,
-        request: &SessionRequest,
-    ) -> MovementSessionMethodDetails {
+    fn resolve_details(&self, request: &SessionRequest) -> MovementSessionMethodDetails {
         use super::session::MovementSessionExt;
-        request.movement_session_details().unwrap_or(MovementSessionMethodDetails {
-            module_address: self.config.module_address.clone(),
-            registry_address: Some(self.config.registry_address.clone()),
-            token_metadata: Some(self.config.token_metadata.clone()),
-            channel_id: None,
-            min_voucher_delta: None,
-            network: None,
-        })
+        request
+            .movement_session_details()
+            .unwrap_or(MovementSessionMethodDetails {
+                module_address: self.config.module_address.clone(),
+                registry_address: Some(self.config.registry_address.clone()),
+                token_metadata: Some(self.config.token_metadata.clone()),
+                channel_id: None,
+                min_voucher_delta: None,
+                network: None,
+            })
     }
 
     fn resolve_rest_url(&self) -> &str {
@@ -517,7 +500,10 @@ impl SessionMethod {
 
     /// Handle 'open' action: verify the open tx landed on-chain, read channel state,
     /// verify initial voucher, create channel in store.
-    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, payload, details), fields(action = "open")))]
+    #[cfg_attr(
+        feature = "observability",
+        tracing::instrument(skip(self, payload, details), fields(action = "open"))
+    )]
     async fn handle_open(
         &self,
         payload: &SessionCredentialPayload,
@@ -531,7 +517,13 @@ impl SessionMethod {
                     cumulative_amount,
                     signature,
                     authorized_signer,
-                } => (tx_hash, channel_id, cumulative_amount, signature, authorized_signer),
+                } => (
+                    tx_hash,
+                    channel_id,
+                    cumulative_amount,
+                    signature,
+                    authorized_signer,
+                ),
                 _ => unreachable!(),
             };
 
@@ -572,9 +564,9 @@ impl SessionMethod {
 
         // Verify voucher signature.
         let sig_bytes = Self::parse_hex_bytes(signature_str)?;
-        let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|_| {
-            VerificationError::invalid_payload("signature must be 64 bytes")
-        })?;
+        let sig_array: [u8; 64] = sig_bytes
+            .try_into()
+            .map_err(|_| VerificationError::invalid_payload("signature must be 64 bytes"))?;
 
         let authorized_pubkey = match authorized_signer_str {
             Some(s) => Self::parse_hex_bytes(s)?,
@@ -597,7 +589,9 @@ impl SessionMethod {
             &authorized_pubkey,
         );
         if !is_valid {
-            return Err(VerificationError::invalid_signature("invalid voucher signature"));
+            return Err(VerificationError::invalid_signature(
+                "invalid voucher signature",
+            ));
         }
 
         // Create channel in store.
@@ -642,7 +636,10 @@ impl SessionMethod {
     }
 
     /// Handle 'topUp' action.
-    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, payload, details), fields(action = "topUp")))]
+    #[cfg_attr(
+        feature = "observability",
+        tracing::instrument(skip(self, payload, details), fields(action = "topUp"))
+    )]
     async fn handle_top_up(
         &self,
         payload: &SessionCredentialPayload,
@@ -705,7 +702,10 @@ impl SessionMethod {
     }
 
     /// Handle 'voucher' action — pure off-chain verification, no RPC call.
-    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, payload, details), fields(action = "voucher")))]
+    #[cfg_attr(
+        feature = "observability",
+        tracing::instrument(skip(self, payload, details), fields(action = "voucher"))
+    )]
     async fn handle_voucher(
         &self,
         payload: &SessionCredentialPayload,
@@ -747,7 +747,10 @@ impl SessionMethod {
     }
 
     /// Handle 'close' action.
-    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, payload, _details), fields(action = "close")))]
+    #[cfg_attr(
+        feature = "observability",
+        tracing::instrument(skip(self, payload, _details), fields(action = "close"))
+    )]
     async fn handle_close(
         &self,
         payload: &SessionCredentialPayload,
@@ -769,7 +772,9 @@ impl SessionMethod {
             .ok_or_else(|| VerificationError::channel_not_found("channel not found"))?;
 
         if channel.finalized {
-            return Err(VerificationError::channel_closed("channel is already finalized"));
+            return Err(VerificationError::channel_closed(
+                "channel is already finalized",
+            ));
         }
 
         let cumulative_amount: u64 = cumulative_amount_str
@@ -786,9 +791,9 @@ impl SessionMethod {
         // Verify signature.
         let channel_id_bytes = Self::parse_hex_bytes(channel_id_str)?;
         let sig_bytes = Self::parse_hex_bytes(signature_str)?;
-        let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|_| {
-            VerificationError::invalid_payload("signature must be 64 bytes")
-        })?;
+        let sig_array: [u8; 64] = sig_bytes
+            .try_into()
+            .map_err(|_| VerificationError::invalid_payload("signature must be 64 bytes"))?;
         let pubkey: [u8; 32] = channel
             .authorized_signer_pubkey
             .clone()
@@ -803,7 +808,9 @@ impl SessionMethod {
             &channel.authorized_signer_pubkey,
         );
         if !is_valid {
-            return Err(VerificationError::invalid_signature("invalid voucher signature"));
+            return Err(VerificationError::invalid_signature(
+                "invalid voucher signature",
+            ));
         }
 
         // Finalize in store.
@@ -850,21 +857,22 @@ impl SessionMethod {
         // Idempotent accept for replays of the highest voucher.
         if cumulative_amount <= channel.highest_voucher_amount {
             let sig_bytes = Self::parse_hex_bytes(signature_str)?;
-            let is_exact_replay = channel
-                .highest_voucher_signature
-                .as_ref()
-                .is_some_and(|stored| {
-                    stored == &sig_bytes && cumulative_amount == channel.highest_voucher_amount
-                });
+            let is_exact_replay =
+                channel
+                    .highest_voucher_signature
+                    .as_ref()
+                    .is_some_and(|stored| {
+                        stored == &sig_bytes && cumulative_amount == channel.highest_voucher_amount
+                    });
             if is_exact_replay {
                 return Ok(Receipt::success(METHOD_NAME, &channel.channel_id));
             }
 
             // Not exact replay — verify signature to prevent forgery.
             let channel_id_bytes = Self::parse_hex_bytes(channel_id_str)?;
-            let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|_| {
-                VerificationError::invalid_payload("signature must be 64 bytes")
-            })?;
+            let sig_array: [u8; 64] = sig_bytes
+                .try_into()
+                .map_err(|_| VerificationError::invalid_payload("signature must be 64 bytes"))?;
             let pubkey: [u8; 32] = channel
                 .authorized_signer_pubkey
                 .clone()
@@ -879,7 +887,9 @@ impl SessionMethod {
                 &channel.authorized_signer_pubkey,
             );
             if !is_valid {
-                return Err(VerificationError::invalid_signature("invalid voucher signature"));
+                return Err(VerificationError::invalid_signature(
+                    "invalid voucher signature",
+                ));
             }
             return Ok(Receipt::success(METHOD_NAME, &channel.channel_id));
         }
@@ -895,9 +905,10 @@ impl SessionMethod {
         // Verify new voucher signature.
         let channel_id_bytes = Self::parse_hex_bytes(channel_id_str)?;
         let sig_bytes = Self::parse_hex_bytes(signature_str)?;
-        let sig_array: [u8; 64] = sig_bytes.clone().try_into().map_err(|_| {
-            VerificationError::invalid_payload("signature must be 64 bytes")
-        })?;
+        let sig_array: [u8; 64] = sig_bytes
+            .clone()
+            .try_into()
+            .map_err(|_| VerificationError::invalid_payload("signature must be 64 bytes"))?;
         let pubkey: [u8; 32] = channel
             .authorized_signer_pubkey
             .clone()
@@ -912,7 +923,9 @@ impl SessionMethod {
             &channel.authorized_signer_pubkey,
         );
         if !is_valid {
-            return Err(VerificationError::invalid_signature("invalid voucher signature"));
+            return Err(VerificationError::invalid_signature(
+                "invalid voucher signature",
+            ));
         }
 
         // Update store.
@@ -1016,9 +1029,7 @@ impl SessionMethodTrait for SessionMethod {
             })?;
 
             match &payload {
-                SessionCredentialPayload::Open { .. } => {
-                    this.handle_open(&payload, &details).await
-                }
+                SessionCredentialPayload::Open { .. } => this.handle_open(&payload, &details).await,
                 SessionCredentialPayload::TopUp { .. } => {
                     this.handle_top_up(&payload, &details).await
                 }

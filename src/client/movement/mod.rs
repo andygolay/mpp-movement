@@ -59,11 +59,7 @@ impl MovementProvider {
     }
 
     /// Create a provider with an explicit sender address.
-    pub fn with_address(
-        signing_key: SigningKey,
-        rest_url: &str,
-        address: &str,
-    ) -> Self {
+    pub fn with_address(signing_key: SigningKey, rest_url: &str, address: &str) -> Self {
         Self {
             signing_key,
             sender_address: address.to_string(),
@@ -82,7 +78,10 @@ impl MovementProvider {
     }
 
     /// Execute a charge payment: transfer tokens to the recipient.
-    #[cfg_attr(feature = "observability", tracing::instrument(skip(self, challenge), fields(intent = "charge")))]
+    #[cfg_attr(
+        feature = "observability",
+        tracing::instrument(skip(self, challenge), fields(intent = "charge"))
+    )]
     async fn pay_charge(
         &self,
         challenge: &PaymentChallenge,
@@ -103,10 +102,7 @@ impl MovementProvider {
         mpp_info!(tx_hash = %tx_hash, "charge payment confirmed");
 
         let echo = challenge.to_echo();
-        Ok(PaymentCredential::new(
-            echo,
-            PaymentPayload::hash(&tx_hash),
-        ))
+        Ok(PaymentCredential::new(echo, PaymentPayload::hash(&tx_hash)))
     }
 
     // ==================== Session / Channel Operations ====================
@@ -252,10 +248,7 @@ impl PaymentProvider for MovementProvider {
             && (intent == movement::INTENT_CHARGE || intent == movement::INTENT_SESSION)
     }
 
-    async fn pay(
-        &self,
-        challenge: &PaymentChallenge,
-    ) -> Result<PaymentCredential, MppError> {
+    async fn pay(&self, challenge: &PaymentChallenge) -> Result<PaymentCredential, MppError> {
         match challenge.intent.as_str() {
             "charge" => self.pay_charge(challenge).await,
             "session" => {
@@ -295,7 +288,8 @@ fn build_transfer_payload(currency: &str, recipient: &str, amount: u64) -> Entry
                 serde_json::json!(recipient),
                 serde_json::json!(amount.to_string()),
             ],
-        ).with_type_arguments(vec!["0x1::fungible_asset::Metadata".to_string()])
+        )
+        .with_type_arguments(vec!["0x1::fungible_asset::Metadata".to_string()])
     }
 }
 
@@ -327,12 +321,11 @@ fn parse_address_bytes(addr: &str) -> Result<[u8; 32], MppError> {
     let hex_str = addr.strip_prefix("0x").unwrap_or(addr);
     // Pad to 64 hex chars (32 bytes) if short (e.g., "0xa" → 32 bytes).
     let padded = format!("{:0>64}", hex_str);
-    let bytes = hex::decode(&padded).map_err(|e| {
-        MppError::Http(format!("invalid address hex '{}': {}", addr, e))
-    })?;
-    bytes.try_into().map_err(|_| {
-        MppError::Http(format!("address must be 32 bytes: {}", addr))
-    })
+    let bytes = hex::decode(&padded)
+        .map_err(|e| MppError::Http(format!("invalid address hex '{}': {}", addr, e)))?;
+    bytes
+        .try_into()
+        .map_err(|_| MppError::Http(format!("address must be 32 bytes: {}", addr)))
 }
 
 #[cfg(test)]
@@ -371,11 +364,8 @@ mod tests {
     #[test]
     fn test_provider_supports() {
         let key = SigningKey::from_bytes(&[0x42; 32]);
-        let provider = MovementProvider::with_address(
-            key,
-            "https://testnet.movementnetwork.xyz/v1",
-            "0xabc",
-        );
+        let provider =
+            MovementProvider::with_address(key, "https://testnet.movementnetwork.xyz/v1", "0xabc");
         assert!(provider.supports("movement", "charge"));
         assert!(provider.supports("movement", "session"));
         assert!(!provider.supports("other", "charge"));
@@ -385,11 +375,8 @@ mod tests {
     #[test]
     fn test_sign_voucher() {
         let key = SigningKey::from_bytes(&[0x42; 32]);
-        let provider = MovementProvider::with_address(
-            key,
-            "https://testnet.movementnetwork.xyz/v1",
-            "0xabc",
-        );
+        let provider =
+            MovementProvider::with_address(key, "https://testnet.movementnetwork.xyz/v1", "0xabc");
 
         let channel_id = [0xAB_u8; 32];
         let sig = provider.sign_voucher(&channel_id, 1000);
@@ -397,13 +384,7 @@ mod tests {
 
         // Verify the signature.
         let pubkey = provider.public_key_bytes();
-        let valid = movement::voucher::verify_voucher(
-            &channel_id,
-            1000,
-            &sig,
-            &pubkey,
-            &[],
-        );
+        let valid = movement::voucher::verify_voucher(&channel_id, 1000, &sig, &pubkey, &[]);
         assert!(valid);
     }
 
@@ -411,11 +392,17 @@ mod tests {
     fn test_is_native_move() {
         assert!(is_native_move("0xa"));
         assert!(is_native_move("0x0a"));
-        assert!(is_native_move("0x000000000000000000000000000000000000000000000000000000000000000a"));
+        assert!(is_native_move(
+            "0x000000000000000000000000000000000000000000000000000000000000000a"
+        ));
         assert!(is_native_move("0xA"));
         assert!(is_native_move("a"));
-        assert!(!is_native_move("0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6"));
-        assert!(!is_native_move("0xc6f5b46ab5307dfe3e565668edcc1461b31cac5a6c2739fba17d9fdde16813a2"));
+        assert!(!is_native_move(
+            "0x63f169ba69623ba6ccf34620857644feb46d0f87e1d7bbcf8c071d30c3d94bd6"
+        ));
+        assert!(!is_native_move(
+            "0xc6f5b46ab5307dfe3e565668edcc1461b31cac5a6c2739fba17d9fdde16813a2"
+        ));
         assert!(!is_native_move("0x1"));
         assert!(!is_native_move("0xab"));
     }
@@ -439,6 +426,9 @@ mod tests {
         // Second arg is the recipient
         assert_eq!(payload.arguments[1].as_str().unwrap(), "0xrecipient");
         // Type argument for FA
-        assert_eq!(payload.type_arguments, vec!["0x1::fungible_asset::Metadata"]);
+        assert_eq!(
+            payload.type_arguments,
+            vec!["0x1::fungible_asset::Metadata"]
+        );
     }
 }

@@ -125,18 +125,21 @@ impl MovementRestClient {
     /// Get account info (sequence number).
     pub async fn get_account(&self, address: &str) -> Result<AccountInfo> {
         let url = format!("{}/accounts/{}", self.rest_url, address);
-        let resp = self.http.get(&url).send().await.map_err(|e| {
-            MppError::Http(format!("failed to get account: {}", e))
-        })?;
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| MppError::Http(format!("failed to get account: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(MppError::Http(format!("get account failed: {}", text)));
         }
 
-        resp.json().await.map_err(|e| {
-            MppError::Http(format!("failed to parse account info: {}", e))
-        })
+        resp.json()
+            .await
+            .map_err(|e| MppError::Http(format!("failed to parse account info: {}", e)))
     }
 
     /// Encode a transaction for signing.
@@ -150,16 +153,11 @@ impl MovementRestClient {
             .json(request)
             .send()
             .await
-            .map_err(|e| {
-                MppError::Http(format!("encode_submission failed: {}", e))
-            })?;
+            .map_err(|e| MppError::Http(format!("encode_submission failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(MppError::Http(format!(
-                "encode_submission error: {}",
-                text
-            )));
+            return Err(MppError::Http(format!("encode_submission error: {}", text)));
         }
 
         // Response is a hex-encoded string (with quotes and 0x prefix).
@@ -185,9 +183,7 @@ impl MovementRestClient {
             .json(signed)
             .send()
             .await
-            .map_err(|e| {
-                MppError::Http(format!("submit transaction failed: {}", e))
-            })?;
+            .map_err(|e| MppError::Http(format!("submit transaction failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -197,20 +193,20 @@ impl MovementRestClient {
             )));
         }
 
-        resp.json().await.map_err(|e| {
-            MppError::Http(format!("failed to parse submission response: {}", e))
-        })
+        resp.json()
+            .await
+            .map_err(|e| MppError::Http(format!("failed to parse submission response: {}", e)))
     }
 
     /// Wait for a transaction to be confirmed.
     pub async fn wait_for_transaction(&self, hash: &str) -> Result<TransactionInfo> {
-        let url = format!(
-            "{}/transactions/wait_by_hash/{}",
-            self.rest_url, hash
-        );
-        let resp = self.http.get(&url).send().await.map_err(|e| {
-            MppError::Http(format!("wait_for_transaction failed: {}", e))
-        })?;
+        let url = format!("{}/transactions/wait_by_hash/{}", self.rest_url, hash);
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| MppError::Http(format!("wait_for_transaction failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -220,9 +216,9 @@ impl MovementRestClient {
             )));
         }
 
-        resp.json().await.map_err(|e| {
-            MppError::Http(format!("failed to parse transaction info: {}", e))
-        })
+        resp.json()
+            .await
+            .map_err(|e| MppError::Http(format!("failed to parse transaction info: {}", e)))
     }
 
     /// Build, sign, and submit an entry function transaction.

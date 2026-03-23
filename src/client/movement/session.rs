@@ -32,8 +32,8 @@ use crate::error::MppError;
 use crate::protocol::core::{PaymentChallenge, PaymentCredential};
 use crate::protocol::intents::SessionRequest;
 use crate::protocol::methods::movement::rest_client::{EntryFunctionPayload, MovementRestClient};
-use crate::protocol::methods::movement::{self, voucher};
 use crate::protocol::methods::movement::session::MovementSessionExt;
+use crate::protocol::methods::movement::{self, voucher};
 
 /// State for a single payment channel.
 #[derive(Debug, Clone)]
@@ -235,10 +235,7 @@ impl PaymentProvider for MovementSessionProvider {
         method == movement::METHOD_NAME && intent == movement::INTENT_SESSION
     }
 
-    async fn pay(
-        &self,
-        challenge: &PaymentChallenge,
-    ) -> Result<PaymentCredential, MppError> {
+    async fn pay(&self, challenge: &PaymentChallenge) -> Result<PaymentCredential, MppError> {
         // Cache the challenge for close().
         {
             let mut guard = self.last_challenge.lock().unwrap();
@@ -246,18 +243,19 @@ impl PaymentProvider for MovementSessionProvider {
         }
 
         let request: SessionRequest = challenge.request.decode()?;
-        let amount: u64 = request.amount.parse().map_err(|e| {
-            MppError::InvalidAmount(format!("invalid session amount: {}", e))
-        })?;
+        let amount: u64 = request
+            .amount
+            .parse()
+            .map_err(|e| MppError::InvalidAmount(format!("invalid session amount: {}", e)))?;
         let payee = request
             .recipient
             .as_deref()
             .ok_or_else(|| MppError::InvalidConfig("no recipient in session challenge".into()))?;
         let currency = &request.currency;
 
-        let module_address = request.module_address().unwrap_or_else(|_| {
-            movement::DEFAULT_MODULE_ADDRESS.to_string()
-        });
+        let module_address = request
+            .module_address()
+            .unwrap_or_else(|_| movement::DEFAULT_MODULE_ADDRESS.to_string());
 
         let key = Self::channel_key(payee, currency, &module_address);
         let echo = challenge.to_echo();
@@ -289,7 +287,9 @@ impl PaymentProvider for MovementSessionProvider {
 
         // No existing channel — open a new one on-chain.
         let deposit = self.resolve_deposit(request.suggested_deposit.as_deref())?;
-        let registry_address = request.registry_address().unwrap_or_else(|| module_address.clone());
+        let registry_address = request
+            .registry_address()
+            .unwrap_or_else(|| module_address.clone());
         let token_metadata = request
             .token_metadata()
             .unwrap_or_else(|| currency.to_string());
@@ -368,11 +368,8 @@ mod tests {
     #[test]
     fn test_session_provider_supports() {
         let key = SigningKey::from_bytes(&[0x42; 32]);
-        let provider = MovementSessionProvider::new(
-            key,
-            "https://testnet.movementnetwork.xyz/v1",
-        )
-        .unwrap();
+        let provider =
+            MovementSessionProvider::new(key, "https://testnet.movementnetwork.xyz/v1").unwrap();
 
         assert!(provider.supports("movement", "session"));
         assert!(!provider.supports("movement", "charge"));
@@ -387,7 +384,10 @@ mod tests {
             .with_max_deposit(1_000_000);
 
         // Server suggests more than max → capped
-        assert_eq!(provider.resolve_deposit(Some("5000000")).unwrap(), 1_000_000);
+        assert_eq!(
+            provider.resolve_deposit(Some("5000000")).unwrap(),
+            1_000_000
+        );
         // Server suggests less than max → use suggestion
         assert_eq!(provider.resolve_deposit(Some("500000")).unwrap(), 500_000);
         // No suggestion → use max

@@ -57,8 +57,8 @@ pub use method::ChargeMethod;
 
 #[cfg(feature = "server")]
 pub use session_method::{
-    ChannelState, ChannelStore, InMemoryChannelStore, OnChainTransaction, SessionMethod,
-    SessionMethodConfig, deduct_from_channel, verify_transaction_on_chain,
+    deduct_from_channel, verify_transaction_on_chain, ChannelState, ChannelStore,
+    InMemoryChannelStore, OnChainTransaction, SessionMethod, SessionMethodConfig,
 };
 
 /// Payment method name for Movement.
@@ -241,10 +241,10 @@ mod tests {
 
     #[test]
     fn test_challenge_id_differs_for_different_params() {
-        let c1 = charge_challenge(TEST_SECRET, "api.example.com", "1000000", "0xa", "0xabc")
-            .unwrap();
-        let c2 = charge_challenge(TEST_SECRET, "api.example.com", "2000000", "0xa", "0xabc")
-            .unwrap();
+        let c1 =
+            charge_challenge(TEST_SECRET, "api.example.com", "1000000", "0xa", "0xabc").unwrap();
+        let c2 =
+            charge_challenge(TEST_SECRET, "api.example.com", "2000000", "0xa", "0xabc").unwrap();
 
         assert_ne!(c1.id, c2.id);
     }

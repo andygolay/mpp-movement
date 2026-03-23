@@ -333,8 +333,7 @@ pub fn to_llms_txt(services: &[Service]) -> String {
     let mut lines = vec![
         "# API Proxy".to_string(),
         String::new(),
-        "> Paid API proxy powered by [Machine Payments Protocol](https://mpp.dev)."
-            .to_string(),
+        "> Paid API proxy powered by [Machine Payments Protocol](https://mpp.dev).".to_string(),
         String::new(),
         "For machine-readable service data, use `GET /services` (JSON).".to_string(),
         String::new(),

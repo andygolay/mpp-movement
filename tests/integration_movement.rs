@@ -15,11 +15,11 @@
 use std::sync::Arc;
 
 use ed25519_dalek::SigningKey;
+use mpp::protocol::methods::movement::session_method::{deduct_from_channel, ChannelState};
 use mpp::protocol::methods::movement::{
     self, compute_channel_id, sign_voucher, verify_voucher, InMemoryChannelStore, SessionMethod,
     SessionMethodConfig,
 };
-use mpp::protocol::methods::movement::session_method::{ChannelState, deduct_from_channel};
 
 // ==================== Test Helpers ====================
 
@@ -32,7 +32,11 @@ fn test_channel_id_bytes() -> Vec<u8> {
     let pubkey = key.verifying_key().to_bytes();
     let payer = [0x0A_u8; 32];
     let payee = [0x0B_u8; 32];
-    let token = [0x00; 31].iter().chain(&[0x0a]).copied().collect::<Vec<u8>>();
+    let token = [0x00; 31]
+        .iter()
+        .chain(&[0x0a])
+        .copied()
+        .collect::<Vec<u8>>();
     let mut token_arr = [0u8; 32];
     token_arr.copy_from_slice(&token);
     let salt = b"test_salt";
@@ -89,7 +93,8 @@ fn make_voucher_credential(
     cumulative_amount: u64,
     signing_key: &SigningKey,
 ) -> mpp::PaymentCredential {
-    let channel_id_bytes = hex::decode(channel_id.strip_prefix("0x").unwrap_or(channel_id)).unwrap();
+    let channel_id_bytes =
+        hex::decode(channel_id.strip_prefix("0x").unwrap_or(channel_id)).unwrap();
     let sig = sign_voucher(signing_key, &channel_id_bytes, cumulative_amount);
 
     let payload = serde_json::json!({
@@ -140,7 +145,8 @@ fn make_close_credential(
     cumulative_amount: u64,
     signing_key: &SigningKey,
 ) -> mpp::PaymentCredential {
-    let channel_id_bytes = hex::decode(channel_id.strip_prefix("0x").unwrap_or(channel_id)).unwrap();
+    let channel_id_bytes =
+        hex::decode(channel_id.strip_prefix("0x").unwrap_or(channel_id)).unwrap();
     let sig = sign_voucher(signing_key, &channel_id_bytes, cumulative_amount);
 
     let payload = serde_json::json!({
@@ -518,7 +524,8 @@ async fn test_voucher_after_close_rejected() {
 
     // Close the channel
     let close_cred = make_close_credential(&channel_id, 0, &key);
-    let request: mpp::protocol::intents::SessionRequest = close_cred.challenge.request.decode().unwrap();
+    let request: mpp::protocol::intents::SessionRequest =
+        close_cred.challenge.request.decode().unwrap();
 
     use mpp::protocol::traits::SessionMethod as _;
     method.verify_session(&close_cred, &request).await.unwrap();
@@ -648,10 +655,7 @@ async fn test_full_session_lifecycle() {
 
     // Step 5: Close the channel
     let close_cred = make_close_credential(&channel_id, 3000, &key);
-    let receipt = method
-        .verify_session(&close_cred, &request)
-        .await
-        .unwrap();
+    let receipt = method.verify_session(&close_cred, &request).await.unwrap();
     assert!(receipt.is_success());
 
     // Verify final state

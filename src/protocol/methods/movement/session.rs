@@ -200,8 +200,7 @@ mod tests {
             unit_type: Some("request".to_string()),
             currency: "0xa".to_string(),
             recipient: Some(
-                "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8"
-                    .to_string(),
+                "0x74f1060add0c641a0c10bb5bab2bf5fd05f94d7c25055f2419fa82d7bbf2b1e8".to_string(),
             ),
             suggested_deposit: Some("1000000".to_string()),
             method_details: Some(serde_json::json!({

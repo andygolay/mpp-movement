@@ -513,8 +513,7 @@ mod tests {
 
     #[test]
     fn test_parse_www_authenticate_leading_whitespace() {
-        let header =
-            r#"  Payment id="test", realm="api", method="movement", intent="charge", request="e30""#;
+        let header = r#"  Payment id="test", realm="api", method="movement", intent="charge", request="e30""#;
         let parsed = parse_www_authenticate(header).unwrap();
         assert_eq!(parsed.id, "test");
     }
@@ -823,8 +822,7 @@ mod tests {
 
     #[test]
     fn test_parse_www_authenticate_rejects_invalid_method_name_dash() {
-        let header =
-            r#"Payment id="abc", realm="api", method="movement-v2", intent="charge", request="e30""#;
+        let header = r#"Payment id="abc", realm="api", method="movement-v2", intent="charge", request="e30""#;
         let err = parse_www_authenticate(header).unwrap_err();
         assert!(err.to_string().contains("Invalid method"));
     }
