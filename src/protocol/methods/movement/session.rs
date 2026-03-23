@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn test_module_address() {
         let req = test_session_request();
-        assert!(req.module_address().unwrap().starts_with("0x3e9e"));
+        assert!(req.module_address().unwrap().starts_with("0x74f1"));
     }
 
     #[test]
